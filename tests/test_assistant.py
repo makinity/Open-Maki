@@ -15,6 +15,8 @@ _TEST_SETTINGS = {
     "wake_phrases": ["hey maki"],
     "require_confirmation": True,
     "console_fallback_enabled": True,
+    "conversation_mode_enabled": False,
+    "always_voice_responses": False,
     "typing_live_mode": False,
     "history_limit": 10,
     "allow_system_commands": False,
@@ -27,6 +29,122 @@ _TEST_SETTINGS = {
 
 class AssistantSpeechIntegrationTests(unittest.TestCase):
     """Verify assistant handling of the speech payload format."""
+
+    @patch("app.assistant.load_knowledge_profile", return_value={"preferred_title": "Sir"})
+    @patch("app.assistant.load_knowledge_text", return_value="")
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.speak")
+    @patch("app.assistant.route_command")
+    @patch("app.assistant.listen")
+    def test_run_uses_knowledge_greeting_at_startup(
+        self,
+        mock_listen,
+        mock_route_command,
+        mock_speak,
+        mock_add_history_entry,
+        mock_load_app_registry,
+        mock_load_knowledge_text,
+        mock_load_knowledge_profile,
+    ) -> None:
+        """The startup prompt should reflect the owner greeting from knowledge.txt."""
+        mock_listen.return_value = {
+            "text": "exit",
+            "source": "console",
+            "used_fallback": False,
+            "status": "ok",
+        }
+        mock_route_command.return_value = {
+            "success": True,
+            "message": "Stopping now.",
+            "data": {"should_exit": True},
+        }
+
+        assistant = MakiBotAssistant(settings=dict(_TEST_SETTINGS))
+        assistant.run()
+
+        first_message = mock_speak.call_args_list[0].args[0]
+        self.assertEqual(first_message, "Hello, Sir. Ready. Say or type a command.")
+        mock_add_history_entry.assert_called_once()
+        mock_load_app_registry.assert_called_once()
+        mock_load_knowledge_text.assert_called_once()
+        mock_load_knowledge_profile.assert_called_once()
+
+    @patch("app.assistant.load_knowledge_profile", return_value={"preferred_title": "Sir"})
+    @patch("app.assistant.load_knowledge_text", return_value="Preferred title: Sir")
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.speak")
+    @patch("app.assistant.route_command")
+    @patch("app.assistant.listen")
+    @patch("app.assistant.build_kind_command_reply", return_value="Of course, sir. Opening notepad for you now.")
+    def test_conversation_mode_rewrites_command_messages(
+        self,
+        mock_build_kind_command_reply,
+        mock_listen,
+        mock_route_command,
+        mock_speak,
+        mock_add_history_entry,
+        mock_load_app_registry,
+        mock_load_knowledge_text,
+        mock_load_knowledge_profile,
+    ) -> None:
+        """Conversation mode should let the LLM soften successful command replies."""
+        mock_listen.return_value = {
+            "text": "open notepad",
+            "source": "voice",
+            "used_fallback": False,
+            "status": "ok",
+        }
+        mock_route_command.return_value = {
+            "success": True,
+            "message": "Opening notepad.",
+            "data": {"status": "completed", "should_exit": True},
+        }
+
+        assistant = MakiBotAssistant(
+            settings={**_TEST_SETTINGS, "conversation_mode_enabled": True}
+        )
+        assistant.run()
+
+        spoken_messages = [call.args[0] for call in mock_speak.call_args_list]
+        self.assertIn("Ready. Talk to me naturally or type a command.", spoken_messages[0])
+        self.assertEqual(spoken_messages[-1], "Of course, sir. Opening notepad for you now.")
+        mock_build_kind_command_reply.assert_called_once()
+        mock_add_history_entry.assert_called_once()
+        mock_load_app_registry.assert_called_once()
+
+    @patch("app.assistant.load_knowledge_profile", return_value={"preferred_title": "Sir"})
+    @patch("app.assistant.load_knowledge_text", return_value="Preferred title: Sir")
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.route_command")
+    @patch("app.assistant.build_chat_reply", return_value="Of course, sir. I can help with that.")
+    def test_conversation_mode_uses_chat_reply_for_unknown_input(
+        self,
+        mock_build_chat_reply,
+        mock_route_command,
+        mock_add_history_entry,
+        mock_load_app_registry,
+        mock_load_knowledge_text,
+        mock_load_knowledge_profile,
+    ) -> None:
+        """Unknown input should get a conversational fallback in conversation mode."""
+        mock_route_command.return_value = {
+            "success": False,
+            "message": "I did not understand that command.",
+            "data": {"status": "unknown"},
+        }
+
+        assistant = MakiBotAssistant(
+            settings={**_TEST_SETTINGS, "conversation_mode_enabled": True}
+        )
+        result = assistant.handle_text("tell me about yourself", source="voice")
+
+        self.assertEqual(result["message"], "Of course, sir. I can help with that.")
+        mock_build_chat_reply.assert_called_once()
+        mock_add_history_entry.assert_called_once()
+        mock_load_app_registry.assert_called_once()
 
     @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
     @patch("app.assistant.add_history_entry")

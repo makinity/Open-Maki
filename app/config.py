@@ -16,6 +16,7 @@ HOME_DIR = Path.home()
 APPS_FILE = DATA_DIR / "apps.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 HISTORY_FILE = DATA_DIR / "history.json"
+KNOWLEDGE_FILE = BASE_DIR / "knowledge.txt"
 
 VOICE_TIMEOUT_SECONDS = 5
 VOICE_PHRASE_LIMIT_SECONDS = 8
@@ -87,6 +88,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "bot_name": BOT_NAME,
     "speech_input_enabled": True,
     "speech_output_enabled": True,
+    "tts_backend": "auto",
     "microphone_index": None,
     "voice_timeout_seconds": VOICE_TIMEOUT_SECONDS,
     "voice_phrase_limit_seconds": VOICE_PHRASE_LIMIT_SECONDS,
@@ -94,6 +96,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "wake_phrases": list(DEFAULT_WAKE_PHRASES),
     "require_confirmation": True,
     "console_fallback_enabled": True,
+    "conversation_mode_enabled": True,
+    "always_voice_responses": True,
     "typing_live_mode": False,
     "history_limit": DEFAULT_HISTORY_LIMIT,
     "allow_system_commands": False,

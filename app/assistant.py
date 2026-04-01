@@ -7,7 +7,9 @@ from app.brain.command_router import route_command
 from app.brain.intent_parser import parse_intent
 from app.config import BOT_NAME, DEFAULT_HISTORY_LIMIT
 from app.services.app_registry import load_app_registry
+from app.services.chat_response_service import build_chat_reply, build_kind_command_reply
 from app.services.history_service import add_history_entry
+from app.services.knowledge_service import load_knowledge_profile, load_knowledge_text
 from app.services.settings_service import load_settings
 from app.speech.listen import listen
 from app.speech.speak import speak
@@ -26,6 +28,8 @@ class MakiAssistant:
         self.logger = get_logger(self.__class__.__name__)
         self.settings = settings or load_settings()
         self.app_registry = load_app_registry()
+        self.knowledge_profile = load_knowledge_profile()
+        self.knowledge_text = load_knowledge_text()
         self.bot_name = str(self.settings.get("bot_name", BOT_NAME))
         self.history_limit = self._get_history_limit()
         self.pending_confirmation: dict[str, str] | None = None
@@ -34,13 +38,7 @@ class MakiAssistant:
 
     def run(self) -> None:
         """Start the assistant command loop until an exit command is received."""
-        if bool(self.settings.get("wake_word_enabled", False)):
-            self.say(
-                f"Ready. Say '{self._get_primary_wake_phrase()}' to wake me, or type a command.",
-                use_tts=False,
-            )
-        else:
-            self.say("Ready. Say or type a command.", use_tts=False)
+        self.say(self._build_ready_message())
 
         while True:
             payload = listen(
@@ -54,14 +52,14 @@ class MakiAssistant:
             if status == "wake_word_only":
                 self.consecutive_voice_misses = 0
                 self.awaiting_followup_command = True
-                self.say("I'm listening.", use_tts=False)
+                self.say("I'm listening.", use_tts=self._should_use_voice_prompts())
                 continue
 
             if status == "missing_wake_word":
                 self.consecutive_voice_misses = 0
                 self.say(
                     f"Please start with a wake phrase, like '{self._get_primary_wake_phrase()} open chrome'.",
-                    use_tts=False,
+                    use_tts=self._should_use_voice_prompts(),
                 )
                 continue
 
@@ -69,7 +67,10 @@ class MakiAssistant:
                 if self.awaiting_followup_command:
                     self.awaiting_followup_command = False
                     self.consecutive_voice_misses = 0
-                    self.say("I didn't catch the follow-up command.", use_tts=False)
+                    self.say(
+                        "I didn't catch the follow-up command.",
+                        use_tts=self._should_use_voice_prompts(),
+                    )
                     fallback_payload = self._capture_console_fallback(
                         "You can type the command instead."
                     )
@@ -82,7 +83,7 @@ class MakiAssistant:
                     if status == "wake_word_only":
                         self.consecutive_voice_misses = 0
                         self.awaiting_followup_command = True
-                        self.say("I'm listening.", use_tts=False)
+                        self.say("I'm listening.", use_tts=self._should_use_voice_prompts())
                         continue
                     if not text:
                         continue
@@ -104,7 +105,7 @@ class MakiAssistant:
                     if status == "wake_word_only":
                         self.consecutive_voice_misses = 0
                         self.awaiting_followup_command = True
-                        self.say("I'm listening.", use_tts=False)
+                        self.say("I'm listening.", use_tts=self._should_use_voice_prompts())
                         continue
                     if not text:
                         continue
@@ -148,6 +149,12 @@ class MakiAssistant:
                 logger=self.logger,
             )
             self._update_pending_confirmation(intent, result)
+
+        result = self._enhance_result_message(
+            user_text=text,
+            intent=intent,
+            result=result,
+        )
 
         add_history_entry(
             command_text=text,
@@ -285,7 +292,7 @@ class MakiAssistant:
     def _build_listen_settings(self) -> dict[str, Any]:
         """Return runtime listen settings, disabling wake-word checks for a follow-up turn."""
         listen_settings = dict(self.settings)
-        if self.awaiting_followup_command:
+        if self.awaiting_followup_command or bool(self.settings.get("conversation_mode_enabled", False)):
             listen_settings["wake_word_enabled"] = False
         return listen_settings
 
@@ -294,7 +301,7 @@ class MakiAssistant:
         if not bool(self.settings.get("console_fallback_enabled", True)):
             return None
 
-        self.say(message, use_tts=False)
+        self.say(message, use_tts=self._should_use_voice_prompts())
         console_settings = dict(self.settings)
         console_settings["speech_input_enabled"] = False
         console_settings["console_wake_word_optional"] = True
@@ -310,6 +317,73 @@ class MakiAssistant:
                     return cleaned_phrase
 
         return "hey maki"
+
+    def _build_ready_message(self) -> str:
+        """Return the startup message, optionally customized by knowledge.txt."""
+        if bool(self.settings.get("conversation_mode_enabled", False)):
+            ready_message = "Ready. Talk to me naturally or type a command."
+        elif bool(self.settings.get("wake_word_enabled", False)):
+            ready_message = (
+                f"Ready. Say '{self._get_primary_wake_phrase()}' to wake me, or type a command."
+            )
+        else:
+            ready_message = "Ready. Say or type a command."
+
+        startup_greeting = str(self.knowledge_profile.get("startup_greeting", "")).strip()
+        if startup_greeting:
+            return f"{startup_greeting} {ready_message}".strip()
+
+        preferred_title = str(self.knowledge_profile.get("preferred_title", "")).strip()
+        if preferred_title:
+            return f"Hello, {preferred_title}. {ready_message}".strip()
+
+        return ready_message
+
+    def _should_use_voice_prompts(self) -> bool:
+        """Return True when assistant prompts should also be spoken aloud."""
+        return bool(self.settings.get("always_voice_responses", False))
+
+    def _enhance_result_message(
+        self,
+        user_text: str,
+        intent: dict[str, str],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the result with an optional conversationally enhanced message."""
+        if not bool(self.settings.get("conversation_mode_enabled", False)):
+            return result
+
+        result_data = result.get("data") or {}
+        if not isinstance(result_data, dict):
+            result_data = {}
+
+        intent_name = str(intent.get("intent", "unknown"))
+        llm_message: str | None
+        if intent_name == "unknown":
+            llm_message = build_chat_reply(
+                user_text=user_text,
+                settings=self.settings,
+                knowledge_text=self.knowledge_text,
+                knowledge_profile=self.knowledge_profile,
+                logger=self.logger,
+            )
+        else:
+            llm_message = build_kind_command_reply(
+                user_text=user_text,
+                intent=intent,
+                result=result,
+                settings=self.settings,
+                knowledge_text=self.knowledge_text,
+                knowledge_profile=self.knowledge_profile,
+                logger=self.logger,
+            )
+
+        if not llm_message:
+            return result
+
+        updated_result = dict(result)
+        updated_result["message"] = llm_message
+        return updated_result
 
     def _parse_intent_with_fallback(self, text: str) -> tuple[dict[str, str], str]:
         """Return the winning intent and which parser produced it."""

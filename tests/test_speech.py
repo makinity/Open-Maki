@@ -253,7 +253,11 @@ class SpeechModuleTests(unittest.TestCase):
         """Missing pyttsx3 should still allow console output."""
         with patch.object(speak_module, "pyttsx3", None), patch.object(
             speak_module, "_TTS_ENGINE", None
-        ), patch.object(speak_module, "_TTS_DISABLED", False), patch(
+        ), patch.object(speak_module, "_TTS_DISABLED", False), patch.object(
+            speak_module, "_TTS_WARNING_MESSAGES", set()
+        ), patch.object(
+            speak_module.os, "name", "posix"
+        ), patch(
             "builtins.print"
         ) as mock_print:
             speak_module.speak(
@@ -267,6 +271,30 @@ class SpeechModuleTests(unittest.TestCase):
 
         mock_print.assert_called_once_with("Maki: Speech fallback test.")
         self.assertTrue(tts_disabled)
+
+    @patch.object(speak_module.os, "name", "nt")
+    @patch("app.speech.speak.subprocess.run")
+    def test_speak_uses_windows_backend_when_auto_mode_is_active(
+        self,
+        mock_subprocess_run,
+    ) -> None:
+        """Windows auto mode should prefer the PowerShell speech backend."""
+        mock_subprocess_run.return_value = SimpleNamespace(returncode=0, stderr="")
+
+        with patch.object(speak_module, "_TTS_WARNING_MESSAGES", set()), patch(
+            "builtins.print"
+        ) as mock_print:
+            speak_module.speak(
+                "Hello from Windows speech.",
+                settings={
+                    "bot_name": "Maki",
+                    "speech_output_enabled": True,
+                    "tts_backend": "auto",
+                },
+            )
+
+        mock_print.assert_called_once_with("Maki: Hello from Windows speech.")
+        mock_subprocess_run.assert_called_once()
 
 
 

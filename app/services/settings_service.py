@@ -31,6 +31,8 @@ _BOOLEAN_SETTING_KEYS = {
     "wake_word_enabled",
     "require_confirmation",
     "console_fallback_enabled",
+    "conversation_mode_enabled",
+    "always_voice_responses",
     "typing_live_mode",
     "allow_system_commands",
     "open_browser_enabled",
