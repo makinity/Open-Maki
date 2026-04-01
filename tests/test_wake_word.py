@@ -36,6 +36,13 @@ class WakeWordTests(unittest.TestCase):
         self.assertTrue(matched)
         self.assertEqual(remainder, "open chrome")
 
+    def test_detect_wake_phrase_accepts_macky_variant(self) -> None:
+        """Common speech-to-text variants like 'macky' should still wake Maki."""
+        matched, remainder = detect_wake_phrase("hey macky open chrome")
+
+        self.assertTrue(matched)
+        self.assertEqual(remainder, "open chrome")
+
 
 if __name__ == "__main__":
     unittest.main()

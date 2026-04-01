@@ -19,7 +19,7 @@ from app.config import (
     SETTINGS_FILE,
 )
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=True)
 
 try:
     import mysql.connector as mysql_connector

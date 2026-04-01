@@ -1,86 +1,132 @@
-﻿# MakiBot
+# MakiBot
 
 MakiBot is a modular local desktop assistant built with Python 3.11+.
-
-Phase 4 adds a cleaner speech layer on top of the existing command system:
-- turn-based voice input with immediate console fallback
-- console-first responses with optional text-to-speech
-- rule-based local command handling with no cloud AI features
-- safer system actions with confirmation flow and settings validation
-- persistent history records that track whether input came from voice, console, or the system
+The assistant runtime name is `Maki`.
 
 ## Features
 
-- Voice input through `SpeechRecognition` when a microphone is available.
-- Reliable typed input fallback when voice input is disabled, unavailable, or times out.
-- Console output for every response, with optional spoken output through `pyttsx3`.
-- Rule-based commands for apps, websites, web search, time/date, folders, typing, help, and exit.
-- Pending confirmation support for dangerous commands such as shutdown and restart.
-- Persistent settings, command templates, app aliases, website aliases, and command history stored in MySQL when enabled.
-- Local JSON fallback remains available when MySQL is not configured yet.
+- Rule-based local command parsing for apps, websites, search, folders, time/date, typing, help, and exit.
+- Optional xAI/Grok intent parsing as a safe fallback only when the rule parser returns `unknown`.
+- Tool-calling-only LLM integration with no arbitrary command execution.
+- Existing dangerous actions still require the current confirmation flow.
+- Voice input with console fallback and optional text-to-speech.
+- Persistent settings, command templates, aliases, and history stored in MySQL when enabled.
+- Local JSON fallback when MySQL is unavailable or disabled.
 
-## Supported Commands
+## Hybrid Intent Parsing
 
-Examples:
-- `open chrome`
-- `launch notepad`
-- `open youtube`
-- `open gmail`
-- `open google`
-- `open facebook`
-- `go to youtube`
-- `google python decorators`
-- `search google for python speech recognition`
-- `youtube jazz piano`
-- `search youtube for lofi`
-- `what time is it`
-- `what is today's date`
-- `create folder projects`
-- `open folder downloads`
-- `type hello world`
-- `shutdown computer`
-- `restart computer`
+Maki now uses a hybrid parser:
+
+1. The existing rule-based parser runs first.
+2. If it returns a known intent, that result is used unchanged.
+3. If it returns `unknown`, Maki can optionally call xAI.
+4. The model is only allowed to choose from supported assistant actions through one tool schema.
+5. The chosen tool call is normalized back into the existing intent format:
+
+```python
+{
+    "intent": "open_app",
+    "target": "chrome",
+    "raw_text": "could you pull up chrome for me"
+}
+```
+
+Important:
+- the LLM only selects an intent
+- it does not execute commands directly
+- all execution still goes through the existing router and action modules
+- shutdown and restart still go through confirmation
+
+## xAI Configuration
+
+Use these environment variables for xAI:
+
+```env
+XAI_API_KEY=
+XAI_API_URL=https://api.x.ai/v1
+```
+
+Use these environment variables for Groq:
+
+```env
+GROQ_API_KEY=
+GROQ_API_URL=https://api.groq.com/openai/v1
+```
+
+Compatibility aliases:
+- `GROK_API_KEY`
+- `GROK_API_URL`
+
+Provider behavior:
+- if an xAI key is present, Maki uses xAI
+- if a Groq or Grok key is present and no xAI key is set, Maki uses Groq
+- you can override this with `llm_provider` in settings: `auto`, `xai`, or `groq`
+
+Runtime settings:
+- `llm_parser_enabled`
+- `llm_provider`
+- `llm_model`
+- `llm_timeout_seconds`
+
+Defaults:
+- xAI model: `grok-4.20-reasoning`
+- fast swap option: `grok-3-mini-fast`
+- Groq model: `openai/gpt-oss-20b`
+- timeout: `15` seconds
+- if a supported provider key is present, LLM parsing auto-enables unless you explicitly set `llm_parser_enabled`
+
+Example model switch in settings storage:
+
+```json
+{
+  "llm_model": "grok-3-mini-fast"
+}
+```
+
+## Tool-Calling Safety
+
+The Grok integration is constrained to one tool:
+- `select_intent`
+
+Allowed LLM intents:
+- `open_app`
+- `open_website`
+- `search_google`
+- `search_youtube`
+- `tell_time`
+- `tell_date`
+- `create_folder`
+- `open_folder`
+- `type_text`
+- `shutdown_computer`
+- `restart_computer`
+- `list_commands`
 - `help`
-- `list commands`
-- `yes`
-- `no`
-- `exit`
+- `exit_bot`
+
+Not exposed to the LLM:
+- `confirm_yes`
+- `confirm_no`
+- `unknown`
 
 ## Speech Flow
 
-MakiBot uses a simple turn-based speech loop:
-1. It tries to capture one spoken command from the microphone.
-2. If speech recognition is unavailable, the microphone is missing, or no speech is recognized in time, it falls back to typed console input.
+Maki uses a turn-based speech loop:
+1. It tries to capture one spoken command.
+2. If speech recognition is unavailable or unclear, it falls back to typed console input.
 3. Every assistant response is printed to the console.
-4. If `pyttsx3` is available and speech output is enabled, the same response is also spoken aloud.
-
-This keeps the assistant usable even when optional audio packages are missing.
-
-## Optional Speech Dependencies
-
-Install the project dependencies first:
-
-```bash
-pip install -r requirements.txt
-```
-
-Speech features depend on these packages:
-- `SpeechRecognition`
-- `PyAudio`
-- `pyttsx3`
-
-If one of them is unavailable, MakiBot should still run locally with console fallback behavior.
+4. If `pyttsx3` is available and speech output is enabled, the response is also spoken aloud.
 
 ## MySQL Storage
 
-Maki can now use MySQL as the source of truth for:
-- assistant settings such as wake phrases and speech toggles
-- command templates such as `open {target}` or `search youtube for {target}`
+Maki can use MySQL as the source of truth for:
+- assistant settings
+- command templates
 - website aliases
 - app and folder aliases
 - command history
 
-Enable it with environment variables:
+Environment variables:
 
 ```env
 MAKI_DB_ENABLED=true
@@ -91,7 +137,7 @@ MAKI_DB_PASSWORD=your_password
 MAKI_DB_NAME=maki_assistant
 ```
 
-On first startup, Maki creates and seeds these tables:
+Tables created on first startup:
 - `assistant_settings`
 - `command_patterns`
 - `website_aliases`
@@ -99,59 +145,34 @@ On first startup, Maki creates and seeds these tables:
 - `folder_aliases`
 - `command_history`
 
-Important:
-- when MySQL is enabled, those tables become the main source of truth
-- existing `apps.json` aliases are imported into MySQL the first time the tables are seeded
-- if MySQL is unavailable, Maki falls back to the local JSON files
+## Local Settings
 
-## apps.json Aliases
-
-`app/data/apps.json` can define custom app and folder aliases.
-
-Example:
-
-```json
-{
-  "chrome": {
-    "type": "app",
-    "command": ["chrome"],
-    "aliases": ["google chrome", "browser"]
-  },
-  "work": {
-    "type": "folder",
-    "path": "C:\\Users\\YourName\\Documents\\Work",
-    "aliases": ["work folder", "office files"]
-  }
-}
-```
-
-Notes:
-- String values still work as simple app commands.
-- Folder entries use `type: "folder"` and a `path`.
-- Built-in aliases exist for common apps and folders, but custom aliases are more reliable.
-
-## Settings
-
-`app/data/settings.json` supports these keys when JSON fallback mode is active:
+When JSON fallback mode is active, `app/data/settings.json` supports keys such as:
 - `bot_name`
 - `speech_input_enabled`
 - `speech_output_enabled`
-- `voice_timeout_seconds`
-- `voice_phrase_limit_seconds`
+- `wake_word_enabled`
+- `wake_phrases`
 - `require_confirmation`
-- `console_fallback_enabled`
-- `typing_live_mode`
 - `history_limit`
-- `allow_system_commands`
-- `open_browser_enabled`
+- `llm_parser_enabled`
+- `llm_model`
+- `llm_timeout_seconds`
 
-Compatibility note:
-- legacy `voice_enabled` is still understood during settings validation, but MakiBot now saves the split `speech_input_enabled` and `speech_output_enabled` settings instead.
+## Install
 
-Safety note:
-- `allow_system_commands` should stay `false` unless you explicitly want confirmed shutdown and restart commands to execute.
+```bash
+pip install -r requirements.txt
+```
 
-## Running
+Main dependencies:
+- `SpeechRecognition`
+- `PyAudio`
+- `pyttsx3`
+- `mysql-connector-python`
+- `openai`
+
+## Run
 
 ```bash
 python run.py

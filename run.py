@@ -1,4 +1,10 @@
-﻿"""Entry point for running the MakiBot application."""
+"""Entry point for running the Maki assistant application."""
+
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 
 from app.main import main
 

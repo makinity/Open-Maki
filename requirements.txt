@@ -4,3 +4,4 @@ PyAudio
 pyautogui
 python-dotenv
 mysql-connector-python
+openai

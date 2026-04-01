@@ -1,4 +1,4 @@
-﻿"""Service helpers for reading and writing assistant settings."""
+"""Service helpers for reading and writing assistant settings."""
 
 import json
 from pathlib import Path
@@ -6,13 +6,19 @@ from typing import Any
 
 from app.config import (
     DEFAULT_HISTORY_LIMIT,
+    DEFAULT_LLM_TIMEOUT_SECONDS,
     DEFAULT_SETTINGS,
     MAX_HISTORY_LIMIT,
+    MAX_LLM_TIMEOUT_SECONDS,
     MAX_VOICE_PHRASE_LIMIT_SECONDS,
     MAX_VOICE_TIMEOUT_SECONDS,
+    MIN_LLM_TIMEOUT_SECONDS,
     MIN_VOICE_PHRASE_LIMIT_SECONDS,
     MIN_VOICE_TIMEOUT_SECONDS,
     SETTINGS_FILE,
+    get_default_llm_model,
+    get_llm_api_key,
+    normalize_llm_model,
 )
 from app.services.database import (
     database_is_ready,
@@ -90,6 +96,32 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     cleaned_settings["speech_output_enabled"] = _coerce_bool(
         settings.get("speech_output_enabled", legacy_voice_enabled)
     )
+    cleaned_settings["llm_provider"] = _coerce_llm_provider(
+        settings.get("llm_provider", DEFAULT_SETTINGS["llm_provider"])
+    )
+    cleaned_settings["llm_parser_enabled"] = _coerce_optional_bool(
+        settings.get("llm_parser_enabled")
+    )
+    if cleaned_settings["llm_parser_enabled"] is None:
+        cleaned_settings["llm_parser_enabled"] = bool(
+            get_llm_api_key(cleaned_settings["llm_provider"])
+        )
+    cleaned_settings["llm_model"] = normalize_llm_model(
+        _coerce_string(
+            settings.get(
+                "llm_model",
+                get_default_llm_model(cleaned_settings["llm_provider"]),
+            ),
+            default=get_default_llm_model(cleaned_settings["llm_provider"]),
+        ),
+        cleaned_settings["llm_provider"],
+    )
+    cleaned_settings["llm_timeout_seconds"] = _coerce_int(
+        settings.get("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS),
+        default=DEFAULT_LLM_TIMEOUT_SECONDS,
+        minimum=MIN_LLM_TIMEOUT_SECONDS,
+        maximum=MAX_LLM_TIMEOUT_SECONDS,
+    )
 
     for key in _BOOLEAN_SETTING_KEYS:
         cleaned_settings[key] = _coerce_bool(settings.get(key, DEFAULT_SETTINGS[key]))
@@ -156,6 +188,17 @@ def _coerce_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _coerce_optional_bool(value: Any) -> bool | None:
+    """Convert boolean-like values or preserve None when unset."""
+    if value is None:
+        return None
+
+    if isinstance(value, str) and not value.strip():
+        return None
+
+    return _coerce_bool(value)
+
+
 def _coerce_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     """Convert a value into a bounded integer using a safe fallback."""
     try:
@@ -164,6 +207,20 @@ def _coerce_int(value: Any, default: int, minimum: int, maximum: int) -> int:
         return default
 
     return max(minimum, min(maximum, parsed_value))
+
+
+def _coerce_string(value: Any, default: str) -> str:
+    """Convert a value into a cleaned string with a safe default."""
+    cleaned_value = normalize_text(str(value))
+    return cleaned_value or default
+
+
+def _coerce_llm_provider(value: Any) -> str:
+    """Convert provider-like values into one of the supported LLM provider labels."""
+    cleaned_value = normalize_text(str(value)).lower()
+    if cleaned_value in {"xai", "groq"}:
+        return cleaned_value
+    return "auto"
 
 
 def _coerce_string_list(value: Any, default: list[str]) -> list[str]:

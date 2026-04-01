@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from app.brain.llm_intent_parser import parse_intent_with_llm
 from app.brain.command_router import route_command
 from app.brain.intent_parser import parse_intent
 from app.config import BOT_NAME, DEFAULT_HISTORY_LIMIT
@@ -78,6 +79,11 @@ class MakiAssistant:
                     text = normalize_text(str(fallback_payload.get("text", "")))
                     source = self._normalize_source(str(fallback_payload.get("source", "console")))
                     status = str(fallback_payload.get("status", "ok")).strip().lower()
+                    if status == "wake_word_only":
+                        self.consecutive_voice_misses = 0
+                        self.awaiting_followup_command = True
+                        self.say("I'm listening.", use_tts=False)
+                        continue
                     if not text:
                         continue
                 else:
@@ -95,6 +101,11 @@ class MakiAssistant:
                     text = normalize_text(str(fallback_payload.get("text", "")))
                     source = self._normalize_source(str(fallback_payload.get("source", "console")))
                     status = str(fallback_payload.get("status", "ok")).strip().lower()
+                    if status == "wake_word_only":
+                        self.consecutive_voice_misses = 0
+                        self.awaiting_followup_command = True
+                        self.say("I'm listening.", use_tts=False)
+                        continue
                     if not text:
                         continue
 
@@ -120,10 +131,11 @@ class MakiAssistant:
     def handle_text(self, text: str, source: str = "console") -> dict[str, Any]:
         """Parse raw user text, handle confirmations, and route the command."""
         normalized_source = self._normalize_source(source)
-        intent = parse_intent(text)
+        intent, parser_source = self._parse_intent_with_fallback(text)
         self.logger.info(
-            "Command received from %s: %s",
+            "Command received from %s using %s parser: %s",
             normalized_source,
+            parser_source,
             intent.get("raw_text", text),
         )
 
@@ -298,6 +310,23 @@ class MakiAssistant:
                     return cleaned_phrase
 
         return "hey maki"
+
+    def _parse_intent_with_fallback(self, text: str) -> tuple[dict[str, str], str]:
+        """Return the winning intent and which parser produced it."""
+        rule_intent = parse_intent(text)
+        if rule_intent.get("intent") != "unknown":
+            return rule_intent, "rule"
+
+        llm_intent = parse_intent_with_llm(
+            text=text,
+            settings=self.settings,
+            app_registry=self.app_registry,
+            logger=self.logger,
+        )
+        if isinstance(llm_intent, dict):
+            return llm_intent, "llm"
+
+        return rule_intent, "rule"
 
 
 # TODO: Add wake-word mode and background listening in a future phase.

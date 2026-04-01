@@ -19,6 +19,9 @@ _TEST_SETTINGS = {
     "history_limit": 10,
     "allow_system_commands": False,
     "open_browser_enabled": True,
+    "llm_parser_enabled": True,
+    "llm_model": "grok-4.20-reasoning",
+    "llm_timeout_seconds": 15,
 }
 
 
@@ -234,6 +237,58 @@ class AssistantSpeechIntegrationTests(unittest.TestCase):
 
     @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
     @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.speak")
+    @patch("app.assistant.route_command")
+    @patch("app.assistant.listen")
+    def test_run_accepts_typed_wake_phrase_after_console_fallback(
+        self,
+        mock_listen,
+        mock_route_command,
+        mock_speak,
+        mock_add_history_entry,
+        mock_load_app_registry,
+    ) -> None:
+        """Typing only the wake phrase during fallback should arm the next command."""
+        mock_listen.side_effect = [
+            {
+                "text": "",
+                "source": "voice",
+                "used_fallback": False,
+                "status": "voice_unrecognized",
+            },
+            {
+                "text": "",
+                "source": "console",
+                "used_fallback": True,
+                "status": "wake_word_only",
+            },
+            {
+                "text": "open chrome",
+                "source": "voice",
+                "used_fallback": False,
+                "status": "ok",
+            },
+        ]
+        mock_route_command.return_value = {
+            "success": True,
+            "message": "Stopping now.",
+            "data": {"should_exit": True},
+        }
+
+        assistant = MakiBotAssistant(
+            settings={**_TEST_SETTINGS, "wake_word_enabled": True}
+        )
+        assistant.run()
+
+        spoken_messages = [call.args[0] for call in mock_speak.call_args_list]
+        self.assertIn("Voice input is not catching anything.", spoken_messages[1])
+        self.assertIn("I'm listening.", spoken_messages[2])
+        self.assertEqual(mock_route_command.call_count, 1)
+        self.assertEqual(mock_add_history_entry.call_count, 1)
+        mock_load_app_registry.assert_called_once()
+
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
     @patch("app.assistant.route_command")
     def test_confirmation_flow_still_executes_after_yes(
         self,
@@ -277,6 +332,78 @@ class AssistantSpeechIntegrationTests(unittest.TestCase):
         self.assertTrue(second_result["message"].startswith("Confirmed."))
         self.assertTrue(mock_route_command.call_args_list[1].kwargs["confirmed"])
         self.assertEqual(mock_add_history_entry.call_count, 2)
+        mock_load_app_registry.assert_called_once()
+
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.parse_intent_with_llm")
+    @patch("app.assistant.parse_intent")
+    @patch("app.assistant.route_command")
+    def test_handle_text_uses_llm_when_rule_parser_returns_unknown(
+        self,
+        mock_route_command,
+        mock_parse_intent,
+        mock_parse_intent_with_llm,
+        mock_add_history_entry,
+        mock_load_app_registry,
+    ) -> None:
+        """Unknown rule parses should fall through to the LLM parser."""
+        mock_parse_intent.return_value = {
+            "intent": "unknown",
+            "target": "could you pull up chrome for me",
+            "raw_text": "could you pull up chrome for me",
+        }
+        mock_parse_intent_with_llm.return_value = {
+            "intent": "open_app",
+            "target": "chrome",
+            "raw_text": "could you pull up chrome for me",
+        }
+        mock_route_command.return_value = {
+            "success": True,
+            "message": "Opening chrome.",
+            "data": {"status": "completed"},
+        }
+
+        assistant = MakiBotAssistant(settings=dict(_TEST_SETTINGS))
+        result = assistant.handle_text("could you pull up chrome for me", source="voice")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(mock_route_command.call_args.args[0]["intent"], "open_app")
+        mock_parse_intent_with_llm.assert_called_once()
+        mock_add_history_entry.assert_called_once()
+        mock_load_app_registry.assert_called_once()
+
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.parse_intent_with_llm")
+    @patch("app.assistant.parse_intent")
+    @patch("app.assistant.route_command")
+    def test_handle_text_keeps_rule_parse_without_llm_for_known_intent(
+        self,
+        mock_route_command,
+        mock_parse_intent,
+        mock_parse_intent_with_llm,
+        mock_add_history_entry,
+        mock_load_app_registry,
+    ) -> None:
+        """Known rule-based commands should not invoke the LLM parser."""
+        mock_parse_intent.return_value = {
+            "intent": "open_app",
+            "target": "chrome",
+            "raw_text": "open chrome",
+        }
+        mock_route_command.return_value = {
+            "success": True,
+            "message": "Opening chrome.",
+            "data": {"status": "completed"},
+        }
+
+        assistant = MakiBotAssistant(settings=dict(_TEST_SETTINGS))
+        result = assistant.handle_text("open chrome", source="voice")
+
+        self.assertTrue(result["success"])
+        mock_parse_intent_with_llm.assert_not_called()
+        mock_add_history_entry.assert_called_once()
         mock_load_app_registry.assert_called_once()
 
 

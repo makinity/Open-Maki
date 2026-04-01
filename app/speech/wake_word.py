@@ -67,6 +67,8 @@ def _expand_single_phrase(phrase: str) -> list[str]:
     if "maki" in phrase and "makibot" not in phrase and "maki bot" not in phrase:
         variants.append(phrase.replace("maki", "makibot"))
         variants.append(phrase.replace("maki", "maki bot"))
+        variants.append(phrase.replace("maki", "macky"))
+        variants.append(phrase.replace("maki", "mackie"))
 
     if "makibot" in phrase:
         variants.append(phrase.replace("makibot", "maki bot"))

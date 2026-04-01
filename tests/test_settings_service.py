@@ -7,7 +7,14 @@ import unittest
 from unittest.mock import patch
 
 import app.services.settings_service as settings_service
-from app.config import MAX_VOICE_TIMEOUT_SECONDS, MIN_VOICE_PHRASE_LIMIT_SECONDS
+from app.config import (
+    DEFAULT_GROQ_LLM_MODEL,
+    DEFAULT_LLM_MODEL,
+    MAX_LLM_TIMEOUT_SECONDS,
+    MAX_VOICE_TIMEOUT_SECONDS,
+    MIN_LLM_TIMEOUT_SECONDS,
+    MIN_VOICE_PHRASE_LIMIT_SECONDS,
+)
 from app.services.settings_service import validate_settings
 
 
@@ -41,6 +48,62 @@ class SettingsServiceTests(unittest.TestCase):
         settings = validate_settings({"microphone_index": "5"})
 
         self.assertEqual(settings["microphone_index"], 5)
+
+    @patch.dict("os.environ", {"XAI_API_KEY": "test-key"}, clear=False)
+    def test_validate_settings_auto_enables_llm_with_xai_api_key(self) -> None:
+        """LLM parsing should auto-enable when an API key is available."""
+        settings = validate_settings({})
+
+        self.assertTrue(settings["llm_parser_enabled"])
+        self.assertEqual(settings["llm_model"], DEFAULT_LLM_MODEL)
+
+    @patch.dict("os.environ", {"GROK_API_KEY": "test-key"}, clear=False)
+    def test_validate_settings_auto_enables_llm_with_grok_api_key(self) -> None:
+        """LLM parsing should also auto-enable for the legacy Grok env name."""
+        settings = validate_settings({})
+
+        self.assertTrue(settings["llm_parser_enabled"])
+        self.assertEqual(settings["llm_model"], DEFAULT_GROQ_LLM_MODEL)
+
+    @patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}, clear=False)
+    def test_validate_settings_uses_groq_defaults_when_groq_key_is_present(self) -> None:
+        """Groq-backed setups should default to a Groq-compatible model."""
+        settings = validate_settings({})
+
+        self.assertEqual(settings["llm_provider"], "auto")
+        self.assertTrue(settings["llm_parser_enabled"])
+        self.assertEqual(settings["llm_model"], DEFAULT_GROQ_LLM_MODEL)
+
+    def test_validate_settings_clamps_llm_timeout_values(self) -> None:
+        """LLM timeout settings should stay within safe bounds."""
+        settings = validate_settings({"llm_timeout_seconds": 999})
+        self.assertEqual(settings["llm_timeout_seconds"], MAX_LLM_TIMEOUT_SECONDS)
+
+        settings = validate_settings({"llm_timeout_seconds": 0})
+        self.assertEqual(settings["llm_timeout_seconds"], MIN_LLM_TIMEOUT_SECONDS)
+
+    @patch.dict(
+        "os.environ",
+        {"XAI_API_KEY": "", "GROQ_API_KEY": "", "GROK_API_KEY": ""},
+        clear=False,
+    )
+    def test_validate_settings_defaults_llm_model(self) -> None:
+        """The default LLM model should be stable when unset."""
+        settings = validate_settings({"llm_model": ""})
+
+        self.assertEqual(settings["llm_model"], DEFAULT_LLM_MODEL)
+
+    def test_validate_settings_rewrites_xai_model_for_groq_provider(self) -> None:
+        """A Groq provider should not keep the xAI Grok model identifier."""
+        settings = validate_settings(
+            {
+                "llm_provider": "groq",
+                "llm_model": DEFAULT_LLM_MODEL,
+            }
+        )
+
+        self.assertEqual(settings["llm_provider"], "groq")
+        self.assertEqual(settings["llm_model"], DEFAULT_GROQ_LLM_MODEL)
 
     def test_validate_settings_preserves_and_cleans_wake_word_fields(self) -> None:
         """Wake-word settings should survive validation with cleaned phrase values."""
