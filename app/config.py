@@ -1,4 +1,4 @@
-﻿"""Configuration constants and default values for the MakiBot backend."""
+"""Configuration constants and default values for the Maki backend."""
 
 from pathlib import Path
 
@@ -67,13 +67,80 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "open_browser_enabled": True,
 }
 
+DEFAULT_WEBSITE_ENTRIES: list[dict[str, str]] = [
+    {"alias": "youtube", "name": "YouTube", "url": "https://www.youtube.com"},
+    {"alias": "gmail", "name": "Gmail", "url": "https://mail.google.com"},
+    {"alias": "google", "name": "Google", "url": "https://www.google.com"},
+    {"alias": "facebook", "name": "Facebook", "url": "https://www.facebook.com"},
+    {"alias": "github", "name": "GitHub", "url": "https://github.com"},
+    {"alias": "wikipedia", "name": "Wikipedia", "url": "https://www.wikipedia.org"},
+]
+
 WEBSITE_ALIASES: dict[str, str] = {
-    "google": "https://www.google.com",
-    "youtube": "https://www.youtube.com",
-    "gmail": "https://mail.google.com",
-    "github": "https://github.com",
-    "wikipedia": "https://www.wikipedia.org",
+    entry["alias"]: entry["url"] for entry in DEFAULT_WEBSITE_ENTRIES
 }
+
+DEFAULT_COMMAND_PATTERNS: list[dict[str, object]] = [
+    {"phrase_template": "yes", "intent": "confirm_yes", "fixed_target": "", "priority": 10},
+    {"phrase_template": "yes please", "intent": "confirm_yes", "fixed_target": "", "priority": 11},
+    {"phrase_template": "confirm", "intent": "confirm_yes", "fixed_target": "", "priority": 12},
+    {"phrase_template": "confirm it", "intent": "confirm_yes", "fixed_target": "", "priority": 13},
+    {"phrase_template": "do it", "intent": "confirm_yes", "fixed_target": "", "priority": 14},
+    {"phrase_template": "no", "intent": "confirm_no", "fixed_target": "", "priority": 20},
+    {"phrase_template": "no thanks", "intent": "confirm_no", "fixed_target": "", "priority": 21},
+    {"phrase_template": "cancel", "intent": "confirm_no", "fixed_target": "", "priority": 22},
+    {"phrase_template": "never mind", "intent": "confirm_no", "fixed_target": "", "priority": 23},
+    {"phrase_template": "stop that", "intent": "confirm_no", "fixed_target": "", "priority": 24},
+    {"phrase_template": "exit", "intent": "exit_bot", "fixed_target": "", "priority": 30},
+    {"phrase_template": "exit bot", "intent": "exit_bot", "fixed_target": "", "priority": 31},
+    {"phrase_template": "quit", "intent": "exit_bot", "fixed_target": "", "priority": 32},
+    {"phrase_template": "quit bot", "intent": "exit_bot", "fixed_target": "", "priority": 33},
+    {"phrase_template": "goodbye", "intent": "exit_bot", "fixed_target": "", "priority": 34},
+    {"phrase_template": "bye", "intent": "exit_bot", "fixed_target": "", "priority": 35},
+    {"phrase_template": "time", "intent": "tell_time", "fixed_target": "", "priority": 40},
+    {"phrase_template": "current time", "intent": "tell_time", "fixed_target": "", "priority": 41},
+    {"phrase_template": "what time is it", "intent": "tell_time", "fixed_target": "", "priority": 42},
+    {"phrase_template": "tell me the time", "intent": "tell_time", "fixed_target": "", "priority": 43},
+    {"phrase_template": "date", "intent": "tell_date", "fixed_target": "", "priority": 50},
+    {"phrase_template": "today's date", "intent": "tell_date", "fixed_target": "", "priority": 51},
+    {"phrase_template": "what date is it", "intent": "tell_date", "fixed_target": "", "priority": 52},
+    {"phrase_template": "what is today's date", "intent": "tell_date", "fixed_target": "", "priority": 53},
+    {"phrase_template": "tell me the date", "intent": "tell_date", "fixed_target": "", "priority": 54},
+    {"phrase_template": "help", "intent": "help", "fixed_target": "", "priority": 60},
+    {"phrase_template": "what can you do", "intent": "help", "fixed_target": "", "priority": 61},
+    {"phrase_template": "what do you do", "intent": "help", "fixed_target": "", "priority": 62},
+    {"phrase_template": "how can you help", "intent": "help", "fixed_target": "", "priority": 63},
+    {"phrase_template": "list commands", "intent": "list_commands", "fixed_target": "", "priority": 70},
+    {"phrase_template": "show commands", "intent": "list_commands", "fixed_target": "", "priority": 71},
+    {"phrase_template": "show me the commands", "intent": "list_commands", "fixed_target": "", "priority": 72},
+    {"phrase_template": "what commands do you know", "intent": "list_commands", "fixed_target": "", "priority": 73},
+    {"phrase_template": "shutdown computer", "intent": "shutdown_computer", "fixed_target": "computer", "priority": 80},
+    {"phrase_template": "shut down computer", "intent": "shutdown_computer", "fixed_target": "computer", "priority": 81},
+    {"phrase_template": "turn off computer", "intent": "shutdown_computer", "fixed_target": "computer", "priority": 82},
+    {"phrase_template": "restart computer", "intent": "restart_computer", "fixed_target": "computer", "priority": 90},
+    {"phrase_template": "reboot computer", "intent": "restart_computer", "fixed_target": "computer", "priority": 91},
+    {"phrase_template": "search youtube for {target}", "intent": "search_youtube", "fixed_target": "", "priority": 100},
+    {"phrase_template": "search on youtube for {target}", "intent": "search_youtube", "fixed_target": "", "priority": 101},
+    {"phrase_template": "youtube {target}", "intent": "search_youtube", "fixed_target": "", "priority": 102},
+    {"phrase_template": "search google for {target}", "intent": "search_google", "fixed_target": "", "priority": 110},
+    {"phrase_template": "google {target}", "intent": "search_google", "fixed_target": "", "priority": 111},
+    {"phrase_template": "search for {target}", "intent": "search_google", "fixed_target": "", "priority": 112},
+    {"phrase_template": "make me a folder called {target}", "intent": "create_folder", "fixed_target": "", "priority": 120},
+    {"phrase_template": "make a folder called {target}", "intent": "create_folder", "fixed_target": "", "priority": 121},
+    {"phrase_template": "create me a folder called {target}", "intent": "create_folder", "fixed_target": "", "priority": 122},
+    {"phrase_template": "create a folder called {target}", "intent": "create_folder", "fixed_target": "", "priority": 123},
+    {"phrase_template": "new folder {target}", "intent": "create_folder", "fixed_target": "", "priority": 124},
+    {"phrase_template": "open folder {target}", "intent": "open_folder", "fixed_target": "", "priority": 130},
+    {"phrase_template": "go to folder {target}", "intent": "open_folder", "fixed_target": "", "priority": 131},
+    {"phrase_template": "type {target}", "intent": "type_text", "fixed_target": "", "priority": 140},
+    {"phrase_template": "write {target}", "intent": "type_text", "fixed_target": "", "priority": 141},
+    {"phrase_template": "open website {target}", "intent": "open_target", "fixed_target": "", "priority": 150},
+    {"phrase_template": "visit {target}", "intent": "open_target", "fixed_target": "", "priority": 151},
+    {"phrase_template": "go to {target}", "intent": "open_target", "fixed_target": "", "priority": 152},
+    {"phrase_template": "open {target}", "intent": "open_target", "fixed_target": "", "priority": 160},
+    {"phrase_template": "launch {target}", "intent": "open_target", "fixed_target": "", "priority": 161},
+    {"phrase_template": "start {target}", "intent": "open_target", "fixed_target": "", "priority": 162},
+]
 
 BUILTIN_APP_ENTRIES: list[dict[str, object]] = [
     {"name": "calculator", "aliases": ["calculator", "calc"], "command": ["calc"]},
@@ -112,4 +179,4 @@ COMMAND_HELP: dict[str, str] = {
 }
 
 
-# TODO: Move more user-editable values into settings or environment variables.
+# TODO: Move more user-editable values into database-backed admin workflows.

@@ -1104,5 +1104,123 @@
       "status": "completed",
       "should_exit": true
     }
+  },
+  {
+    "timestamp": "2026-04-01T08:49:24",
+    "source": "voice",
+    "raw_text": "open chrome",
+    "intent": "open_app",
+    "target": "chrome",
+    "success": true,
+    "status": "completed",
+    "message": "Opening chrome.",
+    "data": {
+      "status": "completed",
+      "target": "chrome"
+    }
+  },
+  {
+    "timestamp": "2026-04-01T08:49:45",
+    "source": "voice",
+    "raw_text": "search facebook",
+    "intent": "unknown",
+    "target": "search facebook",
+    "success": false,
+    "status": "unknown",
+    "message": "I did not understand that command.",
+    "data": {
+      "status": "unknown"
+    }
+  },
+  {
+    "timestamp": "2026-04-01T08:49:54",
+    "source": "voice",
+    "raw_text": "search facebook",
+    "intent": "unknown",
+    "target": "search facebook",
+    "success": false,
+    "status": "unknown",
+    "message": "I did not understand that command.",
+    "data": {
+      "status": "unknown"
+    }
+  },
+  {
+    "timestamp": "2026-04-01T08:50:13",
+    "source": "voice",
+    "raw_text": "open facebook",
+    "intent": "open_website",
+    "target": "facebook",
+    "success": true,
+    "status": "completed",
+    "message": "Opening Facebook.",
+    "data": null
+  },
+  {
+    "timestamp": "2026-04-01T08:50:38",
+    "source": "voice",
+    "raw_text": "exit",
+    "intent": "exit_bot",
+    "target": "",
+    "success": true,
+    "status": "completed",
+    "message": "Goodbye.",
+    "data": {
+      "status": "completed",
+      "should_exit": true
+    }
+  },
+  {
+    "timestamp": "2026-04-01T08:53:39",
+    "source": "voice",
+    "raw_text": "open calculator",
+    "intent": "open_app",
+    "target": "calculator",
+    "success": true,
+    "status": "completed",
+    "message": "Opening calculator.",
+    "data": {
+      "status": "completed",
+      "target": "calculator"
+    }
+  },
+  {
+    "timestamp": "2026-04-01T08:53:47",
+    "source": "console",
+    "raw_text": "exit",
+    "intent": "exit_bot",
+    "target": "",
+    "success": true,
+    "status": "completed",
+    "message": "Goodbye.",
+    "data": {
+      "status": "completed",
+      "should_exit": true
+    }
+  },
+  {
+    "timestamp": "2026-04-01T08:54:43",
+    "source": "voice",
+    "raw_text": "search google for cats",
+    "intent": "search_google",
+    "target": "cats",
+    "success": true,
+    "status": "completed",
+    "message": "Searching Google for cats.",
+    "data": null
+  },
+  {
+    "timestamp": "2026-04-01T08:54:57",
+    "source": "voice",
+    "raw_text": "exit",
+    "intent": "exit_bot",
+    "target": "",
+    "success": true,
+    "status": "completed",
+    "message": "Goodbye.",
+    "data": {
+      "status": "completed",
+      "should_exit": true
+    }
   }
 ]

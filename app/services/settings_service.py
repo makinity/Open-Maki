@@ -14,6 +14,11 @@ from app.config import (
     MIN_VOICE_TIMEOUT_SECONDS,
     SETTINGS_FILE,
 )
+from app.services.database import (
+    database_is_ready,
+    load_settings_dict,
+    save_settings_dict,
+)
 from app.utils.helpers import normalize_text
 
 _BOOLEAN_SETTING_KEYS = {
@@ -28,6 +33,15 @@ _BOOLEAN_SETTING_KEYS = {
 
 def load_settings() -> dict[str, Any]:
     """Load settings from disk and return validated values."""
+    if database_is_ready():
+        data = load_settings_dict()
+        settings = validate_settings(data if isinstance(data, dict) else {})
+
+        if data != settings:
+            save_settings(settings)
+
+        return settings
+
     data = _read_json_file(SETTINGS_FILE)
     settings = validate_settings(data if isinstance(data, dict) else {})
 
@@ -40,6 +54,10 @@ def load_settings() -> dict[str, Any]:
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Validate and save settings to disk."""
     validated_settings = validate_settings(settings)
+
+    if database_is_ready():
+        save_settings_dict(validated_settings)
+        return validated_settings
 
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with SETTINGS_FILE.open("w", encoding="utf-8") as file:
@@ -190,4 +208,4 @@ def _read_json_file(path: Path) -> Any:
         return None
 
 
-# TODO: Add support for user profiles if multiple assistant configurations are needed.
+# TODO: Add support for named assistant profiles when multi-user setups are needed.

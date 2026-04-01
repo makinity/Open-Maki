@@ -3,3 +3,4 @@ pyttsx3
 PyAudio
 pyautogui
 python-dotenv
+mysql-connector-python

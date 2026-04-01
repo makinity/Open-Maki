@@ -16,7 +16,8 @@ Phase 4 adds a cleaner speech layer on top of the existing command system:
 - Console output for every response, with optional spoken output through `pyttsx3`.
 - Rule-based commands for apps, websites, web search, time/date, folders, typing, help, and exit.
 - Pending confirmation support for dangerous commands such as shutdown and restart.
-- Persistent settings, app aliases, and command history stored in `app/data/`.
+- Persistent settings, command templates, app aliases, website aliases, and command history stored in MySQL when enabled.
+- Local JSON fallback remains available when MySQL is not configured yet.
 
 ## Supported Commands
 
@@ -70,6 +71,39 @@ Speech features depend on these packages:
 
 If one of them is unavailable, MakiBot should still run locally with console fallback behavior.
 
+## MySQL Storage
+
+Maki can now use MySQL as the source of truth for:
+- assistant settings such as wake phrases and speech toggles
+- command templates such as `open {target}` or `search youtube for {target}`
+- website aliases
+- app and folder aliases
+- command history
+
+Enable it with environment variables:
+
+```env
+MAKI_DB_ENABLED=true
+MAKI_DB_HOST=127.0.0.1
+MAKI_DB_PORT=3306
+MAKI_DB_USER=root
+MAKI_DB_PASSWORD=your_password
+MAKI_DB_NAME=maki_assistant
+```
+
+On first startup, Maki creates and seeds these tables:
+- `assistant_settings`
+- `command_patterns`
+- `website_aliases`
+- `app_aliases`
+- `folder_aliases`
+- `command_history`
+
+Important:
+- when MySQL is enabled, those tables become the main source of truth
+- existing `apps.json` aliases are imported into MySQL the first time the tables are seeded
+- if MySQL is unavailable, Maki falls back to the local JSON files
+
 ## apps.json Aliases
 
 `app/data/apps.json` can define custom app and folder aliases.
@@ -98,7 +132,7 @@ Notes:
 
 ## Settings
 
-`app/data/settings.json` supports these keys:
+`app/data/settings.json` supports these keys when JSON fallback mode is active:
 - `bot_name`
 - `speech_input_enabled`
 - `speech_output_enabled`

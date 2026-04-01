@@ -3,14 +3,9 @@
 from urllib.parse import quote_plus
 import webbrowser
 
+from app.config import DEFAULT_WEBSITE_ENTRIES
+from app.services.database import load_website_aliases
 from app.utils.helpers import build_result
-
-SUPPORTED_WEBSITES: dict[str, tuple[str, str]] = {
-    "youtube": ("YouTube", "https://www.youtube.com"),
-    "gmail": ("Gmail", "https://mail.google.com"),
-    "google": ("Google", "https://www.google.com"),
-    "facebook": ("Facebook", "https://www.facebook.com"),
-}
 
 
 def open_website(target: str) -> dict[str, object]:
@@ -19,16 +14,26 @@ def open_website(target: str) -> dict[str, object]:
     if not cleaned_target:
         return build_result(False, "Please provide a website name.", None)
 
-    website = SUPPORTED_WEBSITES.get(cleaned_target)
-    if website is None:
+    websites = _load_supported_websites()
+    website = websites.get(cleaned_target)
+    if website is not None:
+        site_name = str(website.get("name", cleaned_target.title()))
+        url = str(website.get("url", "")).strip()
+        if not url:
+            return build_result(False, f"The website alias '{target}' does not have a valid URL.", None)
+        return _open_in_browser(url, f"Opening {site_name}.")
+
+    if "." not in cleaned_target and not cleaned_target.startswith(("http://", "https://", "www.")):
         return build_result(
             False,
-            f"I do not know that website yet: '{target}'. Supported sites are YouTube, Gmail, Google, and Facebook.",
+            f"I do not know that website yet: '{target}'. Add it to the website_aliases table in MySQL or use a direct URL.",
             None,
         )
 
-    site_name, url = website
-    return _open_in_browser(url, f"Opening {site_name}.")
+    url = cleaned_target
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url.lstrip('/')}"
+    return _open_in_browser(url, f"Opening {target.strip()}.")
 
 
 def search_google(query: str) -> dict[str, object]:
@@ -64,4 +69,19 @@ def _open_in_browser(url: str, success_message: str) -> dict[str, object]:
     return build_result(True, success_message, None)
 
 
-# TODO: Add support for more website aliases if the command list grows.
+def _load_supported_websites() -> dict[str, dict[str, str]]:
+    """Return website aliases from MySQL or the default config fallback."""
+    database_aliases = load_website_aliases()
+    if database_aliases:
+        return database_aliases
+
+    return {
+        str(entry["alias"]): {
+            "name": str(entry["name"]),
+            "url": str(entry["url"]),
+        }
+        for entry in DEFAULT_WEBSITE_ENTRIES
+    }
+
+
+# TODO: Add a database-backed generic search action if you want more search engines.

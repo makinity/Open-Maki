@@ -6,10 +6,19 @@ from pathlib import Path
 from typing import Any
 
 from app.config import DEFAULT_HISTORY_LIMIT, HISTORY_FILE
+from app.services.database import (
+    database_is_ready,
+    insert_history_entry,
+    load_history_entries,
+    save_history_entries,
+)
 
 
 def load_history() -> list[dict[str, Any]]:
     """Load command history entries from disk."""
+    if database_is_ready():
+        return load_history_entries()
+
     data = _read_json_file(HISTORY_FILE)
     if not isinstance(data, list):
         return []
@@ -19,6 +28,10 @@ def load_history() -> list[dict[str, Any]]:
 
 def save_history(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Write command history entries to disk."""
+    if database_is_ready():
+        save_history_entries(entries)
+        return entries
+
     HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     with HISTORY_FILE.open("w", encoding="utf-8") as file:
         json.dump(entries, file, indent=2)
@@ -46,6 +59,15 @@ def add_history_entry(
         "message": str(result.get("message", "")),
         "data": _make_json_safe(result_data),
     }
+
+    if database_is_ready():
+        if history_limit > 0:
+            history = load_history_entries(limit=history_limit)
+            history.append(entry)
+            save_history_entries(history[-history_limit:])
+        else:
+            insert_history_entry(entry)
+        return entry
 
     history = load_history()
     history.append(entry)

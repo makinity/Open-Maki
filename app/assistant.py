@@ -34,7 +34,10 @@ class MakiAssistant:
     def run(self) -> None:
         """Start the assistant command loop until an exit command is received."""
         if bool(self.settings.get("wake_word_enabled", False)):
-            self.say("Ready. Say 'hey maki' to wake me, or type a command.", use_tts=False)
+            self.say(
+                f"Ready. Say '{self._get_primary_wake_phrase()}' to wake me, or type a command.",
+                use_tts=False,
+            )
         else:
             self.say("Ready. Say or type a command.", use_tts=False)
 
@@ -56,7 +59,7 @@ class MakiAssistant:
             if status == "missing_wake_word":
                 self.consecutive_voice_misses = 0
                 self.say(
-                    "Please start with a wake phrase, like 'hey maki open chrome'.",
+                    f"Please start with a wake phrase, like '{self._get_primary_wake_phrase()} open chrome'.",
                     use_tts=False,
                 )
                 continue
@@ -284,6 +287,17 @@ class MakiAssistant:
         console_settings["speech_input_enabled"] = False
         console_settings["console_wake_word_optional"] = True
         return listen(settings=console_settings, logger=self.logger)
+
+    def _get_primary_wake_phrase(self) -> str:
+        """Return the first configured wake phrase for user-facing prompts."""
+        wake_phrases = self.settings.get("wake_phrases")
+        if isinstance(wake_phrases, list):
+            for phrase in wake_phrases:
+                cleaned_phrase = normalize_text(str(phrase))
+                if cleaned_phrase:
+                    return cleaned_phrase
+
+        return "hey maki"
 
 
 # TODO: Add wake-word mode and background listening in a future phase.

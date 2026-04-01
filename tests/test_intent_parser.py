@@ -1,6 +1,7 @@
 """Tests for the rule-based intent parser used by MakiBot."""
 
 import unittest
+from unittest.mock import patch
 
 from app.brain.intent_parser import parse_intent
 
@@ -98,6 +99,29 @@ class IntentParserTests(unittest.TestCase):
 
         self.assertEqual(yes_intent["intent"], "confirm_yes")
         self.assertEqual(no_intent["intent"], "confirm_no")
+
+    @patch("app.brain.intent_parser.load_website_aliases")
+    @patch("app.brain.intent_parser.load_command_patterns")
+    def test_parse_intent_uses_database_command_templates(
+        self,
+        mock_load_command_patterns,
+        mock_load_website_aliases,
+    ) -> None:
+        """Database command templates should override the fallback phrase list."""
+        mock_load_command_patterns.return_value = [
+            {
+                "phrase_template": "boot {target}",
+                "intent": "open_target",
+                "fixed_target": "",
+                "priority": 1,
+            }
+        ]
+        mock_load_website_aliases.return_value = {}
+
+        intent = parse_intent("boot chrome")
+
+        self.assertEqual(intent["intent"], "open_app")
+        self.assertEqual(intent["target"], "chrome")
 
 
 # TODO: Add more coverage for quoted targets and direct URLs.

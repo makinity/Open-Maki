@@ -70,7 +70,11 @@ class SettingsServiceTests(unittest.TestCase):
             }
             settings_path.write_text(json.dumps(original_settings), encoding="utf-8")
 
-            with patch.object(settings_service, "SETTINGS_FILE", settings_path):
+            with patch.object(settings_service, "SETTINGS_FILE", settings_path), patch.object(
+                settings_service,
+                "database_is_ready",
+                return_value=False,
+            ):
                 loaded_settings = settings_service.load_settings()
 
             saved_settings = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -78,6 +82,31 @@ class SettingsServiceTests(unittest.TestCase):
             self.assertEqual(loaded_settings["wake_phrases"], original_settings["wake_phrases"])
             self.assertEqual(saved_settings["wake_phrases"], original_settings["wake_phrases"])
             self.assertEqual(saved_settings["custom_note"], "preserve me")
+
+    @patch.object(settings_service, "save_settings_dict")
+    @patch.object(settings_service, "load_settings_dict")
+    @patch.object(settings_service, "database_is_ready", return_value=True)
+    def test_load_settings_uses_database_when_available(
+        self,
+        mock_database_is_ready,
+        mock_load_settings_dict,
+        mock_save_settings_dict,
+    ) -> None:
+        """Database-backed settings should be loaded without touching the JSON file."""
+        mock_load_settings_dict.return_value = {
+            "bot_name": "Maki",
+            "wake_word_enabled": True,
+            "wake_phrases": ["hey maki", "okay maki"],
+            "custom_note": "from database",
+        }
+
+        settings = settings_service.load_settings()
+
+        self.assertTrue(settings["wake_word_enabled"])
+        self.assertEqual(settings["wake_phrases"], ["hey maki", "okay maki"])
+        self.assertEqual(settings["custom_note"], "from database")
+        mock_database_is_ready.assert_called()
+        mock_save_settings_dict.assert_called_once()
 
 
 # TODO: Add persistence tests for settings updates across multiple user profiles.

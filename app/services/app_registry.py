@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from app.config import APPS_FILE, BUILTIN_APP_ENTRIES, BUILTIN_FOLDER_ENTRIES
+from app.services.database import (
+    database_is_ready,
+    load_app_alias_entries,
+    load_folder_alias_entries,
+)
 from app.utils.helpers import normalize_text
 
 RegistryType = dict[str, dict[str, dict[str, Any]]]
@@ -12,6 +17,25 @@ RegistryType = dict[str, dict[str, dict[str, Any]]]
 
 def load_app_registry() -> RegistryType:
     """Load built-in and user-defined application and folder aliases."""
+    if database_is_ready():
+        registry = _create_empty_registry()
+        for entry in load_app_alias_entries():
+            _register_application(
+                registry,
+                name=str(entry.get("name", "")),
+                command=entry.get("command"),
+                aliases=[str(entry.get("alias", ""))],
+            )
+        for entry in load_folder_alias_entries():
+            _register_folder(
+                registry,
+                name=str(entry.get("name", "")),
+                path=entry.get("path"),
+                aliases=[str(entry.get("alias", ""))],
+            )
+        if registry["apps"] or registry["folders"]:
+            return registry
+
     registry = _create_empty_registry()
 
     for entry in BUILTIN_APP_ENTRIES:
@@ -220,4 +244,4 @@ def _read_json_file(path: Path) -> Any:
         return {}
 
 
-# TODO: Add helpers for writing app and folder aliases back to apps.json.
+# TODO: Add helpers for writing app and folder aliases back to MySQL tables.
