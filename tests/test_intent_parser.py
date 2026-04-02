@@ -1,4 +1,4 @@
-"""Tests for the rule-based intent parser used by MakiBot."""
+"""Tests for the rule-based intent parser used by Maki."""
 
 import unittest
 from unittest.mock import patch
@@ -7,7 +7,23 @@ from app.brain.intent_parser import parse_intent
 
 
 class IntentParserTests(unittest.TestCase):
-    """Verify the supported Phase 3 intents are parsed consistently."""
+    """Verify the supported intents are parsed consistently."""
+
+    def setUp(self) -> None:
+        self.command_patterns_patcher = patch(
+            "app.brain.intent_parser.load_command_patterns",
+            return_value=[],
+        )
+        self.website_aliases_patcher = patch(
+            "app.brain.intent_parser.load_website_aliases",
+            return_value={},
+        )
+        self.command_patterns_patcher.start()
+        self.website_aliases_patcher.start()
+
+    def tearDown(self) -> None:
+        self.command_patterns_patcher.stop()
+        self.website_aliases_patcher.stop()
 
     def test_parse_open_app_intent(self) -> None:
         """The parser should detect an application launch command."""
@@ -64,6 +80,44 @@ class IntentParserTests(unittest.TestCase):
         self.assertEqual(intent["intent"], "search_youtube")
         self.assertEqual(intent["target"], "lofi")
 
+    @patch(
+        "app.brain.intent_parser.load_website_aliases",
+        return_value={
+            "github": {
+                "name": "GitHub",
+                "url": "https://github.com",
+                "search_url_template": "https://github.com/search?q={query}",
+            }
+        },
+    )
+    def test_parse_dynamic_site_search_phrase(self, mock_load_website_aliases) -> None:
+        """The parser should detect generic DB-backed site searches."""
+        intent = parse_intent("search github for makibot")
+
+        self.assertEqual(intent["intent"], "search_website")
+        self.assertEqual(intent["site"], "github")
+        self.assertEqual(intent["target"], "makibot")
+        mock_load_website_aliases.assert_called()
+
+    @patch(
+        "app.brain.intent_parser.load_website_aliases",
+        return_value={
+            "wikipedia": {
+                "name": "Wikipedia",
+                "url": "https://www.wikipedia.org",
+                "search_url_template": "https://en.wikipedia.org/w/index.php?search={query}",
+            }
+        },
+    )
+    def test_parse_dynamic_site_short_search_phrase(self, mock_load_website_aliases) -> None:
+        """The parser should keep the site alias small in short-form searches."""
+        intent = parse_intent("wikipedia python decorators")
+
+        self.assertEqual(intent["intent"], "search_website")
+        self.assertEqual(intent["site"], "wikipedia")
+        self.assertEqual(intent["target"], "python decorators")
+        mock_load_website_aliases.assert_called()
+
     def test_parse_create_folder_variation(self) -> None:
         """The parser should detect natural folder creation phrases."""
         intent = parse_intent("make a folder called projects")
@@ -92,6 +146,13 @@ class IntentParserTests(unittest.TestCase):
         self.assertEqual(intent["intent"], "help")
         self.assertEqual(intent["target"], "")
 
+    def test_parse_list_voices_intent(self) -> None:
+        """The parser should detect voice listing requests."""
+        intent = parse_intent("list voices")
+
+        self.assertEqual(intent["intent"], "list_voices")
+        self.assertEqual(intent["target"], "")
+
     def test_parse_confirmation_reply(self) -> None:
         """The parser should detect confirmation replies."""
         yes_intent = parse_intent("yes")
@@ -107,7 +168,7 @@ class IntentParserTests(unittest.TestCase):
         mock_load_command_patterns,
         mock_load_website_aliases,
     ) -> None:
-        """Database command templates should override the fallback phrase list."""
+        """Database command templates should override the built-in phrase list."""
         mock_load_command_patterns.return_value = [
             {
                 "phrase_template": "boot {target}",

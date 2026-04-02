@@ -13,11 +13,16 @@ SELECT_INTENT_TOOL_NAME = "select_intent"
 TARGET_REQUIRED_INTENTS = {
     "open_app",
     "open_website",
+    "search_website",
     "search_google",
     "search_youtube",
     "create_folder",
     "open_folder",
     "type_text",
+}
+
+SITE_REQUIRED_INTENTS = {
+    "search_website",
 }
 
 FIXED_TARGET_INTENTS = {
@@ -53,6 +58,10 @@ def get_select_intent_tool() -> dict[str, Any]:
                         "type": "string",
                         "description": "The user-facing alias or text target when the chosen intent needs one.",
                     },
+                    "site": {
+                        "type": "string",
+                        "description": "The website alias to search when the chosen intent is search_website.",
+                    },
                 },
                 "required": ["intent"],
                 "additionalProperties": False,
@@ -87,11 +96,18 @@ def normalize_tool_call_to_intent(
         if intent_name in TARGET_REQUIRED_INTENTS and not target:
             return None
 
-    return {
+    site = normalize_text(str(arguments.get("site", "")))
+    if intent_name in SITE_REQUIRED_INTENTS and not site:
+        return None
+
+    intent_data = {
         "intent": intent_name,
         "target": target,
         "raw_text": normalize_text(raw_text),
     }
+    if site:
+        intent_data["site"] = site
+    return intent_data
 
 
 def _coerce_arguments(tool_arguments: Any) -> dict[str, Any] | None:

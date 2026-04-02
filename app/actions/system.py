@@ -5,8 +5,27 @@ import subprocess
 from datetime import datetime
 from typing import Any
 
-from app.config import COMMAND_HELP
+from app.speech.speak import get_available_voices
 from app.utils.helpers import build_result
+
+COMMAND_HELP: dict[str, str] = {
+    "open_app": "Open a known desktop application, for example 'open notepad'.",
+    "open_website": "Open a website alias or URL, for example 'go to youtube'.",
+    "search_website": "Search any website that has a search URL template in MySQL, for example 'search github for makibot'.",
+    "search_google": "Search Google, for example 'google python decorators'.",
+    "search_youtube": "Search YouTube, for example 'youtube jazz piano'.",
+    "tell_time": "Tell the current local time.",
+    "tell_date": "Tell today's local date.",
+    "list_voices": "List the text-to-speech voices currently available on this computer.",
+    "create_folder": "Create a folder inside the project workspace.",
+    "open_folder": "Open a known folder such as Downloads or a workspace folder.",
+    "type_text": "Preview typed text, or type for real when enabled in settings.",
+    "shutdown_computer": "Request a computer shutdown after confirmation.",
+    "restart_computer": "Request a computer restart after confirmation.",
+    "list_commands": "List the commands the assistant currently supports.",
+    "help": "Show a short help summary.",
+    "exit_bot": "Exit the assistant loop.",
+}
 
 
 def tell_current_time() -> dict[str, Any]:
@@ -21,6 +40,24 @@ def tell_current_date() -> dict[str, Any]:
     return build_result(True, f"Today's date is {current_date}.", {"status": "completed"})
 
 
+def list_voices() -> dict[str, Any]:
+    """Return the text-to-speech voices available on the current machine."""
+    voices = get_available_voices()
+    if not voices:
+        return build_result(
+            False,
+            "I could not find any available text-to-speech voices on this computer.",
+            {"status": "unavailable", "voices": []},
+        )
+
+    voice_names = [str(voice.get("name", "Unknown voice")) for voice in voices]
+    return build_result(
+        True,
+        "Here are the voices I found: " + ", ".join(voice_names) + ".",
+        {"status": "completed", "voices": voices},
+    )
+
+
 def list_commands() -> dict[str, Any]:
     """Return the list of currently supported commands."""
     commands = [{"intent": intent, "description": description} for intent, description in COMMAND_HELP.items()]
@@ -30,7 +67,7 @@ def list_commands() -> dict[str, Any]:
 def help_command() -> dict[str, Any]:
     """Return a short help summary with the supported command list."""
     result = list_commands()
-    result["message"] = "I can open apps and websites, search the web, manage folders, tell the time and date, and handle safe system requests."
+    result["message"] = "I can open apps and websites, search the web, manage folders, list available voices, tell the time and date, and handle safe system requests."
     return result
 
 

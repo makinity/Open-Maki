@@ -151,6 +151,55 @@ class AssistantSpeechIntegrationTests(unittest.TestCase):
     @patch("app.assistant.speak")
     @patch("app.assistant.route_command")
     @patch("app.assistant.listen")
+    def test_run_speaks_follow_up_prompts_even_when_always_voice_responses_is_false(
+        self,
+        mock_listen,
+        mock_route_command,
+        mock_speak,
+        mock_add_history_entry,
+        mock_load_app_registry,
+    ) -> None:
+        """Follow-up prompts should still use TTS when speech output is enabled."""
+        mock_listen.side_effect = [
+            {
+                "text": "",
+                "source": "voice",
+                "used_fallback": False,
+                "status": "wake_word_only",
+            },
+            {
+                "text": "exit",
+                "source": "voice",
+                "used_fallback": False,
+                "status": "ok",
+            },
+        ]
+        mock_route_command.return_value = {
+            "success": True,
+            "message": "Stopping now.",
+            "data": {"should_exit": True},
+        }
+
+        assistant = MakiBotAssistant(
+            settings={
+                **_TEST_SETTINGS,
+                "speech_output_enabled": True,
+                "always_voice_responses": False,
+                "wake_word_enabled": True,
+            }
+        )
+        assistant.run()
+
+        self.assertEqual(mock_speak.call_args_list[1].args[0], "I'm listening.")
+        self.assertTrue(mock_speak.call_args_list[1].kwargs["use_tts"])
+        mock_add_history_entry.assert_called_once()
+        mock_load_app_registry.assert_called_once()
+
+    @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.assistant.add_history_entry")
+    @patch("app.assistant.speak")
+    @patch("app.assistant.route_command")
+    @patch("app.assistant.listen")
     def test_run_records_voice_source_in_history(
         self,
         mock_listen,

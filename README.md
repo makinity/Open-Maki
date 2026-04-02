@@ -5,31 +5,23 @@ The assistant runtime name is `Maki`.
 
 ## Features
 
-- Rule-based local command parsing for apps, websites, search, folders, time/date, typing, help, and exit.
-- Optional xAI/Grok intent parsing as a safe fallback only when the rule parser returns `unknown`.
+- Rule-based local command parsing for apps, websites, search, folders, time/date, typing, help, voices, and exit.
+- Optional xAI or Groq intent parsing as a safe fallback only when the rule parser returns `unknown`.
 - Tool-calling-only LLM integration with no arbitrary command execution.
 - Existing dangerous actions still require the current confirmation flow.
 - Voice input with console fallback and optional text-to-speech.
-- Persistent settings, command templates, aliases, and history stored in MySQL when enabled.
-- Local JSON fallback when MySQL is unavailable or disabled.
+- Persistent settings, command templates, aliases, websites, and history stored in MySQL.
+- `knowledge.txt` kept locally for owner-facing guidance and startup/chat tone.
 
 ## Hybrid Intent Parsing
 
-Maki now uses a hybrid parser:
+Maki uses a hybrid parser:
 
 1. The existing rule-based parser runs first.
 2. If it returns a known intent, that result is used unchanged.
-3. If it returns `unknown`, Maki can optionally call xAI.
+3. If it returns `unknown`, Maki can optionally call the configured LLM provider.
 4. The model is only allowed to choose from supported assistant actions through one tool schema.
-5. The chosen tool call is normalized back into the existing intent format:
-
-```python
-{
-    "intent": "open_app",
-    "target": "chrome",
-    "raw_text": "could you pull up chrome for me"
-}
-```
+5. The chosen tool call is normalized back into the existing intent format.
 
 Important:
 - the LLM only selects an intent
@@ -37,7 +29,7 @@ Important:
 - all execution still goes through the existing router and action modules
 - shutdown and restart still go through confirmation
 
-## xAI Configuration
+## LLM Provider Configuration
 
 Use these environment variables for xAI:
 
@@ -62,68 +54,27 @@ Provider behavior:
 - if a Groq or Grok key is present and no xAI key is set, Maki uses Groq
 - you can override this with `llm_provider` in settings: `auto`, `xai`, or `groq`
 
-Runtime settings:
+Runtime settings stored in MySQL:
 - `llm_parser_enabled`
 - `llm_provider`
 - `llm_model`
 - `llm_timeout_seconds`
+- speech, wake-word, TTS, and conversation settings
 
 Defaults:
 - xAI model: `grok-4.20-reasoning`
 - fast swap option: `grok-3-mini-fast`
 - Groq model: `openai/gpt-oss-20b`
 - timeout: `15` seconds
-- if a supported provider key is present, LLM parsing auto-enables unless you explicitly set `llm_parser_enabled`
-
-Example model switch in settings storage:
-
-```json
-{
-  "llm_model": "grok-3-mini-fast"
-}
-```
-
-## Tool-Calling Safety
-
-The Grok integration is constrained to one tool:
-- `select_intent`
-
-Allowed LLM intents:
-- `open_app`
-- `open_website`
-- `search_google`
-- `search_youtube`
-- `tell_time`
-- `tell_date`
-- `create_folder`
-- `open_folder`
-- `type_text`
-- `shutdown_computer`
-- `restart_computer`
-- `list_commands`
-- `help`
-- `exit_bot`
-
-Not exposed to the LLM:
-- `confirm_yes`
-- `confirm_no`
-- `unknown`
-
-## Speech Flow
-
-Maki uses a turn-based speech loop:
-1. It tries to capture one spoken command.
-2. If speech recognition is unavailable or unclear, it falls back to typed console input.
-3. Every assistant response is printed to the console.
-4. If `pyttsx3` is available and speech output is enabled, the response is also spoken aloud.
 
 ## MySQL Storage
 
-Maki can use MySQL as the source of truth for:
+MySQL is the required source of truth for:
 - assistant settings
 - command templates
 - website aliases
-- app and folder aliases
+- app aliases
+- folder aliases
 - command history
 
 Environment variables:
@@ -145,19 +96,35 @@ Tables created on first startup:
 - `folder_aliases`
 - `command_history`
 
-## Local Settings
+Website aliases support both open links and optional search templates.
+Useful columns in `website_aliases`:
+- `alias`
+- `display_name`
+- `url`
+- `search_url_template`
 
-When JSON fallback mode is active, `app/data/settings.json` supports keys such as:
-- `bot_name`
-- `speech_input_enabled`
-- `speech_output_enabled`
-- `wake_word_enabled`
-- `wake_phrases`
-- `require_confirmation`
-- `history_limit`
-- `llm_parser_enabled`
-- `llm_model`
-- `llm_timeout_seconds`
+Examples:
+- opening: `open youtube`
+- dynamic search: `search github for makibot`
+- short search: `wikipedia python`
+
+If MySQL is unavailable or disabled, startup stops with an error. Maki no longer falls back to `app/data/*.json` for runtime state.
+
+## knowledge.txt
+
+`knowledge.txt` remains the only local content file used at runtime.
+It is used for:
+- startup greeting customization
+- preferred owner title
+- conversational grounding for chat-style replies
+
+## Speech Flow
+
+Maki uses a turn-based speech loop:
+1. It tries to capture one spoken command.
+2. If speech recognition is unavailable or unclear, it falls back to typed console input.
+3. Every assistant response is printed to the console.
+4. If speech output is enabled and a TTS backend is available, the response is also spoken aloud.
 
 ## Install
 

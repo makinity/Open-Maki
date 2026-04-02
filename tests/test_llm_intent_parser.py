@@ -1,4 +1,4 @@
-"""Tests for the optional xAI-backed LLM intent parser."""
+"""Tests for the optional LLM intent parser."""
 
 import unittest
 from unittest.mock import patch
@@ -24,6 +24,16 @@ _TEST_REGISTRY = {
 
 class LlmIntentParserTests(unittest.TestCase):
     """Verify safe normalization and failure handling for LLM parsing."""
+
+    def setUp(self) -> None:
+        self.website_aliases_patcher = patch(
+            "app.brain.llm_intent_parser.load_website_aliases",
+            return_value={},
+        )
+        self.website_aliases_patcher.start()
+
+    def tearDown(self) -> None:
+        self.website_aliases_patcher.stop()
 
     @patch("app.brain.llm_intent_parser.request_intent_tool_call")
     def test_valid_open_app_tool_call_normalizes_to_intent(self, mock_request_intent_tool_call) -> None:
@@ -64,6 +74,24 @@ class LlmIntentParserTests(unittest.TestCase):
 
         self.assertEqual(intent["intent"], "open_website")
         self.assertEqual(intent["target"], "youtube")
+
+    @patch("app.brain.llm_intent_parser.request_intent_tool_call")
+    def test_valid_search_website_tool_call_normalizes_to_intent(self, mock_request_intent_tool_call) -> None:
+        """A dynamic website search tool call should preserve both site and query."""
+        mock_request_intent_tool_call.return_value = {
+            "name": "select_intent",
+            "arguments": {"intent": "search_website", "site": "github", "target": "makibot"},
+        }
+
+        intent = parse_intent_with_llm(
+            "search github for makibot",
+            settings=dict(_TEST_SETTINGS),
+            app_registry=_TEST_REGISTRY,
+        )
+
+        self.assertEqual(intent["intent"], "search_website")
+        self.assertEqual(intent["site"], "github")
+        self.assertEqual(intent["target"], "makibot")
 
     @patch("app.brain.llm_intent_parser.request_intent_tool_call")
     def test_shutdown_tool_call_normalizes_fixed_target(self, mock_request_intent_tool_call) -> None:

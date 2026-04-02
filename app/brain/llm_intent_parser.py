@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.brain.tool_definitions import get_select_intent_tool, normalize_tool_call_to_intent
-from app.config import DEFAULT_WEBSITE_ENTRIES, LLM_ALLOWED_INTENTS, get_llm_api_key
-from app.services.database import load_website_aliases
+from app.config import LLM_ALLOWED_INTENTS, get_llm_api_key
+from app.models.website_aliases import DEFAULT_WEBSITE_ENTRIES, load_website_aliases
 from app.services.llm_service import request_intent_tool_call
 from app.utils.helpers import normalize_text
 

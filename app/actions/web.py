@@ -1,10 +1,9 @@
-"""Web actions for opening websites and performing simple searches."""
+"""Web actions for opening websites and performing database-driven site searches."""
 
 from urllib.parse import quote_plus
 import webbrowser
 
-from app.config import DEFAULT_WEBSITE_ENTRIES
-from app.services.database import load_website_aliases
+from app.models.website_aliases import DEFAULT_WEBSITE_ENTRIES, load_website_aliases
 from app.utils.helpers import build_result
 
 
@@ -38,22 +37,49 @@ def open_website(target: str) -> dict[str, object]:
 
 def search_google(query: str) -> dict[str, object]:
     """Search Google in the default browser."""
-    cleaned_query = query.strip()
-    if not cleaned_query:
-        return build_result(False, "Please provide a Google search query.", None)
-
-    url = f"https://www.google.com/search?q={quote_plus(cleaned_query)}"
-    return _open_in_browser(url, f"Searching Google for {cleaned_query}.")
+    return search_website("google", query)
 
 
 def search_youtube(query: str) -> dict[str, object]:
     """Search YouTube in the default browser."""
-    cleaned_query = query.strip()
-    if not cleaned_query:
-        return build_result(False, "Please provide a YouTube search query.", None)
+    return search_website("youtube", query)
 
-    url = f"https://www.youtube.com/results?search_query={quote_plus(cleaned_query)}"
-    return _open_in_browser(url, f"Searching YouTube for {cleaned_query}.")
+
+def search_website(site: str, query: str) -> dict[str, object]:
+    """Search one website alias using its database-backed search URL template."""
+    cleaned_site = site.strip().lower()
+    cleaned_query = query.strip()
+    if not cleaned_site:
+        return build_result(False, "Please provide a website alias to search.", None)
+    if not cleaned_query:
+        return build_result(False, "Please provide a search query.", None)
+
+    websites = _load_supported_websites()
+    website = websites.get(cleaned_site)
+    if website is None:
+        return build_result(
+            False,
+            f"I do not know that website yet: '{site}'. Add it to the website_aliases table in MySQL.",
+            None,
+        )
+
+    site_name = str(website.get("name", cleaned_site.title()))
+    search_url_template = str(website.get("search_url_template", "")).strip()
+    if not search_url_template:
+        return build_result(
+            False,
+            f"{site_name} does not have a search URL template yet. Add one in the website_aliases table.",
+            None,
+        )
+
+    encoded_query = quote_plus(cleaned_query)
+    if "{query}" in search_url_template:
+        url = search_url_template.replace("{query}", encoded_query)
+    else:
+        joiner = "&" if "?" in search_url_template else "?"
+        url = f"{search_url_template}{joiner}q={encoded_query}"
+
+    return _open_in_browser(url, f"Searching {site_name} for {cleaned_query}.")
 
 
 def _open_in_browser(url: str, success_message: str) -> dict[str, object]:
@@ -79,9 +105,10 @@ def _load_supported_websites() -> dict[str, dict[str, str]]:
         str(entry["alias"]): {
             "name": str(entry["name"]),
             "url": str(entry["url"]),
+            "search_url_template": str(entry.get("search_url_template", "")),
         }
         for entry in DEFAULT_WEBSITE_ENTRIES
     }
 
 
-# TODO: Add a database-backed generic search action if you want more search engines.
+# TODO: Add admin helpers for creating website aliases directly from the assistant.

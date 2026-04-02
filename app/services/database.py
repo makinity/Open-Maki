@@ -1,25 +1,17 @@
-"""Database helpers for optional MySQL-backed assistant storage."""
+"""Database helpers for MySQL-backed assistant storage."""
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 from app.config import (
-    APPS_FILE,
-    BUILTIN_APP_ENTRIES,
-    BUILTIN_FOLDER_ENTRIES,
-    DEFAULT_COMMAND_PATTERNS,
     DEFAULT_SETTINGS,
-    DEFAULT_WEBSITE_ENTRIES,
-    SETTINGS_FILE,
+    database_is_enabled,
+    get_database_config,
+    get_database_name,
 )
-
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=True)
 
 try:
     import mysql.connector as mysql_connector
@@ -28,17 +20,29 @@ except Exception:  # pragma: no cover - optional dependency
 
 _DATABASE_INITIALIZED = False
 _DATABASE_READY = False
+_DATABASE_ERROR = ""
 
 
 def initialize_database(logger: Any | None = None) -> bool:
     """Create the configured MySQL schema and seed default assistant data."""
-    global _DATABASE_INITIALIZED, _DATABASE_READY
+    global _DATABASE_INITIALIZED, _DATABASE_READY, _DATABASE_ERROR
 
     if _DATABASE_INITIALIZED:
         return _DATABASE_READY
 
     _DATABASE_INITIALIZED = True
-    if not _database_requested() or mysql_connector is None:
+    if not _database_requested():
+        _DATABASE_ERROR = (
+            "MySQL storage is required. Set MAKI_DB_ENABLED=true and provide the "
+            "database connection settings in .env."
+        )
+        _DATABASE_READY = False
+        return False
+
+    if mysql_connector is None:
+        _DATABASE_ERROR = (
+            "MySQL storage is required, but mysql-connector-python is not installed."
+        )
         _DATABASE_READY = False
         return False
 
@@ -46,26 +50,27 @@ def initialize_database(logger: Any | None = None) -> bool:
         _ensure_database_exists()
         connection = _connect()
         if connection is None:
+            _DATABASE_ERROR = "Could not connect to the configured MySQL database."
             _DATABASE_READY = False
             return False
 
         try:
             _ensure_tables(connection)
+            _ensure_optional_columns(connection)
             _seed_settings_table(connection)
             _seed_command_patterns_table(connection)
             _seed_website_aliases_table(connection)
             _seed_app_alias_tables(connection)
             connection.commit()
+            _DATABASE_ERROR = ""
             _DATABASE_READY = True
         finally:
             connection.close()
     except Exception as error:  # pragma: no cover - depends on external MySQL state
         _DATABASE_READY = False
+        _DATABASE_ERROR = f"MySQL storage is unavailable: {error}"
         if logger is not None:
-            logger.warning(
-                "MySQL storage is unavailable. Falling back to local JSON files: %s",
-                error,
-            )
+            logger.error("%s", _DATABASE_ERROR)
 
     return _DATABASE_READY
 
@@ -75,8 +80,25 @@ def database_is_ready() -> bool:
     return initialize_database()
 
 
+def ensure_database_ready() -> None:
+    """Raise an error when the required MySQL backend is unavailable."""
+    if initialize_database():
+        return
+
+    raise RuntimeError(
+        _DATABASE_ERROR or "MySQL storage is required but could not be initialized."
+    )
+
+
+def get_database_error() -> str:
+    """Return the last known database initialization error message."""
+    initialize_database()
+    return _DATABASE_ERROR
+
+
 def load_settings_dict() -> dict[str, Any]:
     """Load assistant settings from the MySQL settings table."""
+    ensure_database_ready()
     rows = _fetch_rows(
         """
         SELECT setting_key, setting_value
@@ -96,7 +118,7 @@ def save_settings_dict(settings: dict[str, Any]) -> bool:
     """Persist assistant settings into the MySQL settings table."""
     connection = _connect()
     if connection is None:
-        return False
+        raise RuntimeError("Could not connect to the MySQL database.")
 
     try:
         cursor = connection.cursor()
@@ -117,6 +139,7 @@ def save_settings_dict(settings: dict[str, Any]) -> bool:
 
 def load_command_patterns() -> list[dict[str, Any]]:
     """Load enabled command templates from the MySQL command pattern table."""
+    ensure_database_ready()
     rows = _fetch_rows(
         """
         SELECT phrase_template, intent, fixed_target, priority
@@ -145,9 +168,10 @@ def load_command_patterns() -> list[dict[str, Any]]:
 
 def load_website_aliases() -> dict[str, dict[str, str]]:
     """Load enabled website aliases from MySQL."""
+    ensure_database_ready()
     rows = _fetch_rows(
         """
-        SELECT alias, display_name, url
+        SELECT alias, display_name, url, search_url_template
         FROM website_aliases
         WHERE enabled = 1
         """
@@ -155,19 +179,21 @@ def load_website_aliases() -> dict[str, dict[str, str]]:
     aliases: dict[str, dict[str, str]] = {}
     for row in rows:
         alias = str(row.get("alias", "")).strip().lower()
-        url = str(row.get("url", "")).strip()
+        url = str(row.get("url") or "").strip()
         if not alias or not url:
             continue
 
         aliases[alias] = {
             "name": str(row.get("display_name", alias)).strip() or alias.title(),
             "url": url,
+            "search_url_template": str(row.get("search_url_template") or "").strip(),
         }
     return aliases
 
 
 def load_app_alias_entries() -> list[dict[str, Any]]:
     """Load enabled app alias rows from MySQL."""
+    ensure_database_ready()
     rows = _fetch_rows(
         """
         SELECT alias, name, command_json
@@ -193,6 +219,7 @@ def load_app_alias_entries() -> list[dict[str, Any]]:
 
 def load_folder_alias_entries() -> list[dict[str, Any]]:
     """Load enabled folder alias rows from MySQL."""
+    ensure_database_ready()
     rows = _fetch_rows(
         """
         SELECT alias, name, path
@@ -219,6 +246,7 @@ def load_folder_alias_entries() -> list[dict[str, Any]]:
 
 def load_history_entries(limit: int | None = None) -> list[dict[str, Any]]:
     """Load command history entries from MySQL in chronological order."""
+    ensure_database_ready()
     params: tuple[Any, ...] = ()
     query = """
         SELECT timestamp, source, raw_text, intent, target, success, status, message, data_json
@@ -252,7 +280,7 @@ def save_history_entries(entries: list[dict[str, Any]]) -> bool:
     """Replace command history rows in MySQL with the provided entries."""
     connection = _connect()
     if connection is None:
-        return False
+        raise RuntimeError("Could not connect to the MySQL database.")
 
     try:
         cursor = connection.cursor()
@@ -289,7 +317,7 @@ def insert_history_entry(entry: dict[str, Any]) -> bool:
     """Insert a single command history row into MySQL."""
     connection = _connect()
     if connection is None:
-        return False
+        raise RuntimeError("Could not connect to the MySQL database.")
 
     try:
         cursor = connection.cursor()
@@ -322,7 +350,7 @@ def insert_history_entry(entry: dict[str, Any]) -> bool:
 
 def _database_requested() -> bool:
     """Return True when MySQL storage has been enabled through the environment."""
-    return _get_bool_env("MAKI_DB_ENABLED", False)
+    return database_is_enabled()
 
 
 def _connect(include_database: bool = True) -> Any | None:
@@ -330,15 +358,7 @@ def _connect(include_database: bool = True) -> Any | None:
     if mysql_connector is None:
         return None
 
-    connection_config: dict[str, Any] = {
-        "host": os.getenv("MAKI_DB_HOST", "127.0.0.1"),
-        "port": _get_int_env("MAKI_DB_PORT", 3306),
-        "user": os.getenv("MAKI_DB_USER", "root"),
-        "password": os.getenv("MAKI_DB_PASSWORD", ""),
-        "autocommit": False,
-    }
-    if include_database:
-        connection_config["database"] = os.getenv("MAKI_DB_NAME", "maki_assistant")
+    connection_config = get_database_config(include_database=include_database)
 
     try:  # pragma: no cover - depends on external MySQL state
         return mysql_connector.connect(**connection_config)
@@ -352,7 +372,7 @@ def _ensure_database_exists() -> None:
     if connection is None:
         raise RuntimeError("Could not connect to the MySQL server.")
 
-    database_name = os.getenv("MAKI_DB_NAME", "maki_assistant")
+    database_name = get_database_name()
     try:  # pragma: no cover - depends on external MySQL state
         cursor = connection.cursor()
         cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{database_name}`")
@@ -388,6 +408,7 @@ def _ensure_tables(connection: Any) -> None:
             alias VARCHAR(100) PRIMARY KEY,
             display_name VARCHAR(100) NOT NULL,
             url TEXT NOT NULL,
+            search_url_template TEXT NULL,
             enabled BOOLEAN NOT NULL DEFAULT TRUE
         )
         """,
@@ -431,15 +452,8 @@ def _seed_settings_table(connection: Any) -> None:
     if _count_rows(connection, "assistant_settings") > 0:
         return
 
-    settings_to_seed = dict(DEFAULT_SETTINGS)
-    json_settings = _read_json_file(SETTINGS_FILE)
-    if isinstance(json_settings, dict):
-        for key, value in json_settings.items():
-            if isinstance(key, str):
-                settings_to_seed[key] = value
-
     cursor = connection.cursor()
-    for key, value in settings_to_seed.items():
+    for key, value in dict(DEFAULT_SETTINGS).items():
         cursor.execute(
             """
             INSERT INTO assistant_settings (setting_key, setting_value)
@@ -450,15 +464,14 @@ def _seed_settings_table(connection: Any) -> None:
 
 
 def _seed_command_patterns_table(connection: Any) -> None:
-    """Insert default command templates when the table is empty."""
-    if _count_rows(connection, "command_patterns") > 0:
-        return
+    """Insert any missing default command templates into the database."""
+    from app.models.command_patterns import DEFAULT_COMMAND_PATTERNS
 
     cursor = connection.cursor()
     for pattern in DEFAULT_COMMAND_PATTERNS:
         cursor.execute(
             """
-            INSERT INTO command_patterns (phrase_template, intent, fixed_target, priority, enabled)
+            INSERT IGNORE INTO command_patterns (phrase_template, intent, fixed_target, priority, enabled)
             VALUES (%s, %s, %s, %s, %s)
             """,
             (
@@ -472,28 +485,83 @@ def _seed_command_patterns_table(connection: Any) -> None:
 
 
 def _seed_website_aliases_table(connection: Any) -> None:
-    """Insert default website aliases when the website table is empty."""
-    if _count_rows(connection, "website_aliases") > 0:
-        return
+    """Insert missing website aliases and backfill default search templates."""
+    from app.models.website_aliases import DEFAULT_WEBSITE_ENTRIES
 
     cursor = connection.cursor()
     for entry in DEFAULT_WEBSITE_ENTRIES:
         cursor.execute(
             """
-            INSERT INTO website_aliases (alias, display_name, url, enabled)
-            VALUES (%s, %s, %s, %s)
+            INSERT IGNORE INTO website_aliases (alias, display_name, url, search_url_template, enabled)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (
                 str(entry.get("alias", "")).lower(),
                 str(entry.get("name", "")),
                 str(entry.get("url", "")),
+                str(entry.get("search_url_template", "")),
                 True,
             ),
         )
+        search_url_template = str(entry.get("search_url_template", "")).strip()
+        if search_url_template:
+            cursor.execute(
+                """
+                UPDATE website_aliases
+                SET search_url_template = %s
+                WHERE alias = %s AND (search_url_template IS NULL OR search_url_template = '')
+                """,
+                (search_url_template, str(entry.get("alias", "")).lower()),
+            )
+
+
+def _ensure_optional_columns(connection: Any) -> None:
+    """Add newer optional columns to existing tables when they are missing."""
+    _ensure_column(
+        connection,
+        table_name="website_aliases",
+        column_name="search_url_template",
+        definition="TEXT NULL",
+    )
+
+
+def _ensure_column(
+    connection: Any,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    """Add one column to an existing table when it is missing."""
+    if _column_exists(connection, table_name, column_name):
+        return
+
+    cursor = connection.cursor()
+    cursor.execute(
+        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
+    )
+
+
+def _column_exists(connection: Any, table_name: str, column_name: str) -> bool:
+    """Return True when one column already exists in the active database."""
+    database_name = get_database_name()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s AND column_name = %s
+        """,
+        (database_name, table_name, column_name),
+    )
+    row = cursor.fetchone()
+    return bool(row and int(row[0]) > 0)
 
 
 def _seed_app_alias_tables(connection: Any) -> None:
-    """Seed app and folder aliases from built-ins and the existing JSON file."""
+    """Seed app and folder aliases from built-in defaults."""
+    from app.models.app_aliases import BUILTIN_APP_ENTRIES
+    from app.models.folder_aliases import BUILTIN_FOLDER_ENTRIES
+
     if _count_rows(connection, "app_aliases") == 0:
         for entry in BUILTIN_APP_ENTRIES:
             _insert_app_alias_entry(
@@ -511,42 +579,6 @@ def _seed_app_alias_tables(connection: Any) -> None:
                 path=entry.get("path"),
                 aliases=entry.get("aliases", []),
             )
-
-    json_data = _read_json_file(APPS_FILE)
-    if not isinstance(json_data, dict):
-        return
-
-    for name, value in json_data.items():
-        _seed_alias_entry_from_json(connection, str(name), value)
-
-
-def _seed_alias_entry_from_json(connection: Any, name: str, value: Any) -> None:
-    """Seed a database alias row from one apps.json entry."""
-    if isinstance(value, (str, list)):
-        _insert_app_alias_entry(connection, name=name, command=value, aliases=[name])
-        return
-
-    if not isinstance(value, dict):
-        return
-
-    aliases = [name, *_extract_aliases(value.get("aliases"))]
-    entry_type = str(value.get("type", "app")).strip().lower() or "app"
-
-    if entry_type == "folder":
-        _insert_folder_alias_entry(
-            connection,
-            name=name,
-            path=value.get("path") or value.get("target"),
-            aliases=aliases,
-        )
-        return
-
-    _insert_app_alias_entry(
-        connection,
-        name=name,
-        command=value.get("command") or value.get("path"),
-        aliases=aliases,
-    )
 
 
 def _insert_app_alias_entry(connection: Any, name: str, command: Any, aliases: Any) -> None:
@@ -609,14 +641,14 @@ def _fetch_rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]
     """Return query rows as dictionaries from the configured MySQL database."""
     connection = _connect()
     if connection is None:
-        return []
+        raise RuntimeError("Could not connect to the MySQL database.")
 
     try:
         cursor = connection.cursor(dictionary=True)
         cursor.execute(query, params)
         return list(cursor.fetchall())
-    except Exception:
-        return []
+    except Exception as error:
+        raise RuntimeError(f"MySQL query failed: {error}") from error
     finally:
         connection.close()
 
@@ -651,22 +683,6 @@ def _format_timestamp(value: Any) -> str:
     return str(value)
 
 
-def _get_bool_env(name: str, default: bool) -> bool:
-    """Read a boolean flag from the environment."""
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _get_int_env(name: str, default: int) -> int:
-    """Read an integer-like value from the environment."""
-    try:
-        return int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
 def _normalize_command(command: Any) -> list[str] | str | None:
     """Normalize app commands into the forms supported by the launcher."""
     if isinstance(command, str):
@@ -692,7 +708,7 @@ def _normalize_path(path: Any) -> Path | None:
 
 
 def _extract_aliases(raw_aliases: Any) -> set[str]:
-    """Return normalized alias strings from raw JSON or config data."""
+    """Return normalized alias strings from raw config data."""
     if isinstance(raw_aliases, str):
         raw_values = [raw_aliases]
     elif isinstance(raw_aliases, (list, tuple, set)):
@@ -709,15 +725,6 @@ def _extract_aliases(raw_aliases: Any) -> set[str]:
         if alias:
             aliases.add(alias)
     return aliases
-
-
-def _read_json_file(path: Path) -> Any:
-    """Read JSON data from disk when seeding the database for the first time."""
-    try:
-        with path.open("r", encoding="utf-8-sig") as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
 
 
 # TODO: Add helper functions for updating command tables from an admin interface.

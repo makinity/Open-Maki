@@ -340,8 +340,8 @@ class MakiAssistant:
         return ready_message
 
     def _should_use_voice_prompts(self) -> bool:
-        """Return True when assistant prompts should also be spoken aloud."""
-        return bool(self.settings.get("always_voice_responses", False))
+        """Return True when assistant prompts should follow normal speech output."""
+        return True
 
     def _enhance_result_message(
         self,

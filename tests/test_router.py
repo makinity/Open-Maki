@@ -1,4 +1,4 @@
-"""Tests for the Phase 3 command router used by MakiBot."""
+"""Tests for the command router used by Maki."""
 
 import unittest
 from unittest.mock import patch
@@ -7,7 +7,7 @@ from app.brain.command_router import route_command
 
 
 class CommandRouterTests(unittest.TestCase):
-    """Verify safe router behavior for Phase 3 commands."""
+    """Verify safe router behavior for assistant commands."""
 
     def test_route_time_command_returns_success(self) -> None:
         """The router should return a friendly time response."""
@@ -24,6 +24,26 @@ class CommandRouterTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertIn("commands", result["data"])
         self.assertGreater(len(result["data"]["commands"]), 0)
+
+    @patch("app.actions.system.get_available_voices")
+    def test_route_list_voices_returns_voice_data(self, mock_get_available_voices) -> None:
+        """The router should return the available TTS voices."""
+        mock_get_available_voices.return_value = [
+            {
+                "id": "voice-1",
+                "name": "Microsoft David Desktop - English (United States)",
+                "languages": "en-US",
+                "gender": "Male",
+                "age": "Adult",
+            }
+        ]
+
+        result = route_command({"intent": "list_voices", "target": "", "raw_text": "list voices"})
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"]["status"], "completed")
+        self.assertEqual(len(result["data"]["voices"]), 1)
+        self.assertIn("David", result["message"])
 
     def test_route_shutdown_requires_confirmation(self) -> None:
         """Shutdown should not execute until it is confirmed."""
@@ -57,8 +77,13 @@ class CommandRouterTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["data"]["status"], "not_found")
 
+    @patch("app.actions.web.load_website_aliases", return_value={})
     @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
-    def test_route_open_website_returns_success(self, mock_open_new_tab) -> None:
+    def test_route_open_website_returns_success(
+        self,
+        mock_open_new_tab,
+        mock_load_website_aliases,
+    ) -> None:
         """The router should return a valid result for website commands."""
         result = route_command(
             {"intent": "open_website", "target": "youtube", "raw_text": "open youtube"}
@@ -72,10 +97,16 @@ class CommandRouterTests(unittest.TestCase):
                 "data": None,
             },
         )
+        mock_load_website_aliases.assert_called_once_with()
         mock_open_new_tab.assert_called_once_with("https://www.youtube.com")
 
+    @patch("app.actions.web.load_website_aliases", return_value={})
     @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
-    def test_route_search_google_returns_success(self, mock_open_new_tab) -> None:
+    def test_route_search_google_returns_success(
+        self,
+        mock_open_new_tab,
+        mock_load_website_aliases,
+    ) -> None:
         """The router should return a valid result for Google searches."""
         result = route_command(
             {
@@ -93,12 +124,57 @@ class CommandRouterTests(unittest.TestCase):
                 "data": None,
             },
         )
+        mock_load_website_aliases.assert_called_once_with()
         mock_open_new_tab.assert_called_once_with(
             "https://www.google.com/search?q=python+decorators"
         )
 
+    @patch(
+        "app.actions.web.load_website_aliases",
+        return_value={
+            "github": {
+                "name": "GitHub",
+                "url": "https://github.com",
+                "search_url_template": "https://github.com/search?q={query}",
+            }
+        },
+    )
     @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
-    def test_route_search_youtube_returns_success(self, mock_open_new_tab) -> None:
+    def test_route_search_website_returns_success(
+        self,
+        mock_open_new_tab,
+        mock_load_website_aliases,
+    ) -> None:
+        """The router should search any DB-backed website alias with a search URL template."""
+        result = route_command(
+            {
+                "intent": "search_website",
+                "site": "github",
+                "target": "makibot",
+                "raw_text": "search github for makibot",
+            }
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "success": True,
+                "message": "Searching GitHub for makibot.",
+                "data": None,
+            },
+        )
+        mock_load_website_aliases.assert_called_once_with()
+        mock_open_new_tab.assert_called_once_with(
+            "https://github.com/search?q=makibot"
+        )
+
+    @patch("app.actions.web.load_website_aliases", return_value={})
+    @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
+    def test_route_search_youtube_returns_success(
+        self,
+        mock_open_new_tab,
+        mock_load_website_aliases,
+    ) -> None:
         """The router should return a valid result for YouTube searches."""
         result = route_command(
             {
@@ -116,13 +192,14 @@ class CommandRouterTests(unittest.TestCase):
                 "data": None,
             },
         )
+        mock_load_website_aliases.assert_called_once_with()
         mock_open_new_tab.assert_called_once_with(
             "https://www.youtube.com/results?search_query=jazz+piano"
         )
 
     @patch("app.actions.apps.subprocess.Popen")
     def test_route_open_app_uses_nested_registry_aliases(self, mock_popen) -> None:
-        """Open-app routing should work with the nested Phase 3 registry structure."""
+        """Open-app routing should work with the nested registry structure."""
         result = route_command(
             {"intent": "open_app", "target": "chrome", "raw_text": "open chrome"},
             app_registry={
@@ -139,6 +216,17 @@ class CommandRouterTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["message"], "Opening chrome.")
         mock_popen.assert_called_once_with(["chrome"])
+
+    def test_route_open_app_not_found_mentions_database_table(self) -> None:
+        """Missing app aliases should point the user to the database-backed source."""
+        result = route_command(
+            {"intent": "open_app", "target": "unknownapp", "raw_text": "open unknownapp"},
+            app_registry={"apps": {}, "folders": {}},
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("app_aliases table", result["message"])
+        self.assertNotIn("apps.json", result["message"])
 
     def test_route_unknown_command_returns_failure(self) -> None:
         """The router should reject unsupported commands cleanly."""

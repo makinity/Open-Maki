@@ -8,13 +8,14 @@ from app.actions.system import (
     exit_bot,
     help_command,
     list_commands,
+    list_voices,
     restart_computer,
     shutdown_computer,
     tell_current_date,
     tell_current_time,
 )
 from app.actions.typing_actions import type_text
-from app.actions.web import open_website, search_google, search_youtube
+from app.actions.web import open_website, search_google, search_website, search_youtube
 from app.config import BASE_DIR, DANGEROUS_INTENTS
 from app.utils.helpers import build_result
 
@@ -32,6 +33,7 @@ def route_command(
 
     intent_name = str(intent.get("intent", "unknown"))
     target = str(intent.get("target", "")).strip()
+    site = str(intent.get("site", "")).strip()
 
     if logger is not None:
         logger.debug("Routing intent '%s' with target '%s'.", intent_name, target)
@@ -40,7 +42,7 @@ def route_command(
         return _build_confirmation_result(intent_name, target)
 
     try:
-        return _dispatch_intent(intent_name, target, settings, app_registry)
+        return _dispatch_intent(intent_name, target, site, settings, app_registry)
     except Exception as error:
         if logger is not None:
             logger.exception("Command routing failed for intent '%s'.", intent_name)
@@ -54,6 +56,7 @@ def route_command(
 def _dispatch_intent(
     intent_name: str,
     target: str,
+    site: str,
     settings: dict[str, Any],
     app_registry: dict[str, Any],
 ) -> dict[str, Any]:
@@ -61,10 +64,12 @@ def _dispatch_intent(
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
         "open_app": lambda: open_app(target, app_registry),
         "open_website": lambda: open_website(target),
+        "search_website": lambda: search_website(site, target),
         "search_google": lambda: search_google(target),
         "search_youtube": lambda: search_youtube(target),
         "tell_time": tell_current_time,
         "tell_date": tell_current_date,
+        "list_voices": list_voices,
         "create_folder": lambda: create_folder(target, base_path=BASE_DIR),
         "open_folder": lambda: open_folder(target, registry=app_registry, base_path=BASE_DIR),
         "type_text": lambda: type_text(

@@ -1,7 +1,5 @@
 """Service helpers for reading and writing assistant settings."""
 
-import json
-from pathlib import Path
 from typing import Any
 
 from app.config import (
@@ -15,13 +13,12 @@ from app.config import (
     MIN_LLM_TIMEOUT_SECONDS,
     MIN_VOICE_PHRASE_LIMIT_SECONDS,
     MIN_VOICE_TIMEOUT_SECONDS,
-    SETTINGS_FILE,
     get_default_llm_model,
     get_llm_api_key,
     normalize_llm_model,
 )
 from app.services.database import (
-    database_is_ready,
+    ensure_database_ready,
     load_settings_dict,
     save_settings_dict,
 )
@@ -40,37 +37,22 @@ _BOOLEAN_SETTING_KEYS = {
 
 
 def load_settings() -> dict[str, Any]:
-    """Load settings from disk and return validated values."""
-    if database_is_ready():
-        data = load_settings_dict()
-        settings = validate_settings(data if isinstance(data, dict) else {})
-
-        if data != settings:
-            save_settings(settings)
-
-        return settings
-
-    data = _read_json_file(SETTINGS_FILE)
+    """Load settings from MySQL and return validated values."""
+    ensure_database_ready()
+    data = load_settings_dict()
     settings = validate_settings(data if isinstance(data, dict) else {})
 
     if data != settings:
-        save_settings(settings)
+        save_settings_dict(settings)
 
     return settings
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """Validate and save settings to disk."""
+    """Validate and save settings into MySQL."""
+    ensure_database_ready()
     validated_settings = validate_settings(settings)
-
-    if database_is_ready():
-        save_settings_dict(validated_settings)
-        return validated_settings
-
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with SETTINGS_FILE.open("w", encoding="utf-8") as file:
-        json.dump(validated_settings, file, indent=2)
-
+    save_settings_dict(validated_settings)
     return validated_settings
 
 
@@ -149,6 +131,22 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         default=int(DEFAULT_SETTINGS["voice_phrase_limit_seconds"]),
         minimum=MIN_VOICE_PHRASE_LIMIT_SECONDS,
         maximum=MAX_VOICE_PHRASE_LIMIT_SECONDS,
+    )
+    cleaned_settings["tts_voice_name"] = _coerce_string(
+        settings.get("tts_voice_name", DEFAULT_SETTINGS["tts_voice_name"]),
+        default=str(DEFAULT_SETTINGS["tts_voice_name"]),
+    )
+    cleaned_settings["tts_rate"] = _coerce_int(
+        settings.get("tts_rate", DEFAULT_SETTINGS["tts_rate"]),
+        default=int(DEFAULT_SETTINGS["tts_rate"]),
+        minimum=-10,
+        maximum=10,
+    )
+    cleaned_settings["tts_volume"] = _coerce_int(
+        settings.get("tts_volume", DEFAULT_SETTINGS["tts_volume"]),
+        default=int(DEFAULT_SETTINGS["tts_volume"]),
+        minimum=0,
+        maximum=100,
     )
     cleaned_settings["history_limit"] = _coerce_int(
         settings.get("history_limit", DEFAULT_HISTORY_LIMIT),
@@ -255,15 +253,6 @@ def _coerce_optional_int(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError):
-        return None
-
-
-def _read_json_file(path: Path) -> Any:
-    """Read JSON from disk and return None when the file is invalid."""
-    try:
-        with path.open("r", encoding="utf-8-sig") as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
         return None
 
 

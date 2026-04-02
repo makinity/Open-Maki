@@ -1,4 +1,4 @@
-﻿"""Application actions for safely opening desktop apps."""
+"""Application actions for safely opening desktop apps."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def open_app(target: str, app_registry: dict[str, Any] | None = None) -> dict[st
     if app_entry is None:
         return build_result(
             False,
-            f"I could not find an app alias for '{cleaned_target}'. Add it to apps.json.",
+            f"I could not find an app alias for '{cleaned_target}'. Add it to the app_aliases table.",
             {"status": "not_found", "target": cleaned_target},
         )
 

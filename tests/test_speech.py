@@ -296,6 +296,43 @@ class SpeechModuleTests(unittest.TestCase):
         mock_print.assert_called_once_with("Maki: Hello from Windows speech.")
         mock_subprocess_run.assert_called_once()
 
+    def test_speak_recreates_pyttsx3_engine_for_each_reply(self) -> None:
+        """Repeated pyttsx3 replies should not reuse a stale cached engine."""
+        first_engine = MagicMock()
+        second_engine = MagicMock()
+        fake_pyttsx3 = MagicMock()
+        fake_pyttsx3.init.side_effect = [first_engine, second_engine]
+
+        with patch.object(speak_module, "pyttsx3", fake_pyttsx3), patch.object(
+            speak_module, "_TTS_ENGINE", None
+        ), patch.object(speak_module, "_TTS_DISABLED", False), patch.object(
+            speak_module.os, "name", "posix"
+        ), patch(
+            "builtins.print"
+        ):
+            speak_module.speak(
+                "First reply.",
+                settings={
+                    "bot_name": "Maki",
+                    "speech_output_enabled": True,
+                    "tts_backend": "pyttsx3",
+                },
+            )
+            speak_module.speak(
+                "Second reply.",
+                settings={
+                    "bot_name": "Maki",
+                    "speech_output_enabled": True,
+                    "tts_backend": "pyttsx3",
+                },
+            )
+
+        self.assertEqual(fake_pyttsx3.init.call_count, 2)
+        first_engine.say.assert_called_once_with("First reply.")
+        second_engine.say.assert_called_once_with("Second reply.")
+        first_engine.stop.assert_called()
+        second_engine.stop.assert_called()
+
 
 
 def _build_fake_sr(recognizer_class: type[object]) -> SimpleNamespace:

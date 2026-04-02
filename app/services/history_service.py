@@ -1,13 +1,12 @@
-﻿"""Service helpers for loading and saving command history entries."""
+"""Service helpers for loading and saving command history entries."""
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.config import DEFAULT_HISTORY_LIMIT, HISTORY_FILE
+from app.config import DEFAULT_HISTORY_LIMIT
 from app.services.database import (
-    database_is_ready,
+    ensure_database_ready,
     insert_history_entry,
     load_history_entries,
     save_history_entries,
@@ -15,27 +14,15 @@ from app.services.database import (
 
 
 def load_history() -> list[dict[str, Any]]:
-    """Load command history entries from disk."""
-    if database_is_ready():
-        return load_history_entries()
-
-    data = _read_json_file(HISTORY_FILE)
-    if not isinstance(data, list):
-        return []
-
-    return [item for item in data if isinstance(item, dict)]
+    """Load command history entries from MySQL."""
+    ensure_database_ready()
+    return load_history_entries()
 
 
 def save_history(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Write command history entries to disk."""
-    if database_is_ready():
-        save_history_entries(entries)
-        return entries
-
-    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with HISTORY_FILE.open("w", encoding="utf-8") as file:
-        json.dump(entries, file, indent=2)
-
+    """Write command history entries into MySQL."""
+    ensure_database_ready()
+    save_history_entries(entries)
     return entries
 
 
@@ -46,7 +33,8 @@ def add_history_entry(
     history_limit: int = DEFAULT_HISTORY_LIMIT,
     source: str = "user",
 ) -> dict[str, Any]:
-    """Append a single history entry to the JSON history file."""
+    """Append a single history entry to the MySQL command history table."""
+    ensure_database_ready()
     result_data = result.get("data")
     entry = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -60,22 +48,13 @@ def add_history_entry(
         "data": _make_json_safe(result_data),
     }
 
-    if database_is_ready():
-        if history_limit > 0:
-            history = load_history_entries(limit=history_limit)
-            history.append(entry)
-            save_history_entries(history[-history_limit:])
-        else:
-            insert_history_entry(entry)
-        return entry
-
-    history = load_history()
-    history.append(entry)
-
     if history_limit > 0:
-        history = history[-history_limit:]
+        history = load_history_entries(limit=history_limit)
+        history.append(entry)
+        save_history_entries(history[-history_limit:])
+    else:
+        insert_history_entry(entry)
 
-    save_history(history)
     return entry
 
 
@@ -105,15 +84,6 @@ def _make_json_safe(value: Any) -> Any:
         return [_make_json_safe(item) for item in value]
 
     return str(value)
-
-
-def _read_json_file(path: Path) -> Any:
-    """Read JSON from disk and return a safe default when it fails."""
-    try:
-        with path.open("r", encoding="utf-8-sig") as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
 
 
 # TODO: Add filtering helpers for inspecting recent command history.

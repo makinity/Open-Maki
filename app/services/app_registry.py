@@ -1,12 +1,10 @@
-﻿"""Service helpers for loading and resolving app and folder aliases."""
+"""Service helpers for loading and resolving app and folder aliases."""
 
-import json
 from pathlib import Path
 from typing import Any
 
-from app.config import APPS_FILE, BUILTIN_APP_ENTRIES, BUILTIN_FOLDER_ENTRIES
 from app.services.database import (
-    database_is_ready,
+    ensure_database_ready,
     load_app_alias_entries,
     load_folder_alias_entries,
 )
@@ -16,50 +14,25 @@ RegistryType = dict[str, dict[str, dict[str, Any]]]
 
 
 def load_app_registry() -> RegistryType:
-    """Load built-in and user-defined application and folder aliases."""
-    if database_is_ready():
-        registry = _create_empty_registry()
-        for entry in load_app_alias_entries():
-            _register_application(
-                registry,
-                name=str(entry.get("name", "")),
-                command=entry.get("command"),
-                aliases=[str(entry.get("alias", ""))],
-            )
-        for entry in load_folder_alias_entries():
-            _register_folder(
-                registry,
-                name=str(entry.get("name", "")),
-                path=entry.get("path"),
-                aliases=[str(entry.get("alias", ""))],
-            )
-        if registry["apps"] or registry["folders"]:
-            return registry
-
+    """Load application and folder aliases from MySQL."""
+    ensure_database_ready()
     registry = _create_empty_registry()
 
-    for entry in BUILTIN_APP_ENTRIES:
+    for entry in load_app_alias_entries():
         _register_application(
             registry,
             name=str(entry.get("name", "")),
             command=entry.get("command"),
-            aliases=entry.get("aliases", []),
+            aliases=[str(entry.get("alias", ""))],
         )
 
-    for entry in BUILTIN_FOLDER_ENTRIES:
+    for entry in load_folder_alias_entries():
         _register_folder(
             registry,
             name=str(entry.get("name", "")),
             path=entry.get("path"),
-            aliases=entry.get("aliases", []),
+            aliases=[str(entry.get("alias", ""))],
         )
-
-    data = _read_json_file(APPS_FILE)
-    if not isinstance(data, dict):
-        return registry
-
-    for name, value in data.items():
-        _register_json_entry(registry, str(name), value)
 
     return registry
 
@@ -111,39 +84,6 @@ def _create_empty_registry() -> RegistryType:
     }
 
 
-def _register_json_entry(registry: RegistryType, name: str, value: Any) -> None:
-    """Register a single JSON entry from apps.json."""
-    if isinstance(value, str):
-        _register_application(registry, name=name, command=value, aliases=[name])
-        return
-
-    if isinstance(value, list):
-        _register_application(registry, name=name, command=value, aliases=[name])
-        return
-
-    if not isinstance(value, dict):
-        return
-
-    entry_type = normalize_alias(str(value.get("type", "app"))) or "app"
-    aliases = [name, *_extract_aliases(value.get("aliases"))]
-
-    if entry_type == "folder":
-        _register_folder(
-            registry,
-            name=name,
-            path=value.get("path") or value.get("target"),
-            aliases=aliases,
-        )
-        return
-
-    _register_application(
-        registry,
-        name=name,
-        command=value.get("command") or value.get("path"),
-        aliases=aliases,
-    )
-
-
 def _register_application(
     registry: RegistryType,
     name: str,
@@ -191,7 +131,7 @@ def _register_folder(
 
 
 def _extract_aliases(raw_aliases: Any) -> set[str]:
-    """Return normalized aliases from JSON or built-in entry data."""
+    """Return normalized aliases from registry entry data."""
     if isinstance(raw_aliases, str):
         raw_values = [raw_aliases]
     elif isinstance(raw_aliases, (list, tuple, set)):
@@ -233,15 +173,6 @@ def _normalize_path(path: Any) -> Path | None:
         return Path(path.strip())
 
     return None
-
-
-def _read_json_file(path: Path) -> Any:
-    """Read JSON from disk and return a safe default when it fails."""
-    try:
-        with path.open("r", encoding="utf-8-sig") as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
 
 
 # TODO: Add helpers for writing app and folder aliases back to MySQL tables.
