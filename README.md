@@ -134,6 +134,7 @@ pip install -r requirements.txt
 
 Main dependencies:
 - `SpeechRecognition`
+- `pywebview`
 - `PyAudio`
 - `pyttsx3`
 - `mysql-connector-python`
@@ -144,6 +145,27 @@ Main dependencies:
 ```bash
 python run.py
 ```
+
+## Desktop UI
+
+The first desktop UI scaffold uses `pywebview` with a local HTML, CSS, and JavaScript frontend.
+
+Run it with:
+
+```bash
+python run_ui.py
+```
+
+Current UI scaffold behavior:
+- dark futuristic desktop shell with an animated central orb
+- typed command input with placeholder Python bridge responses
+- microphone button with placeholder listening state
+- session-only recent activity panel
+
+Notes:
+- this UI is additive and does not replace the console runtime yet
+- Bootstrap 5 is loaded from CDN in v1, so the styled UI expects internet access for that asset
+- the Python bridge is intentionally shallow for now and does not invoke the live assistant loop
 
 ## Tests
 

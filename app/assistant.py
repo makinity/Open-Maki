@@ -16,7 +16,7 @@ from app.speech.speak import speak
 from app.utils.helpers import build_result, normalize_text
 from app.utils.logger import get_logger
 
-VALID_HISTORY_SOURCES = {"voice", "console", "system"}
+VALID_HISTORY_SOURCES = {"voice", "console", "system", "ui"}
 VOICE_MISS_LIMIT_FOR_CONSOLE = 1
 
 
