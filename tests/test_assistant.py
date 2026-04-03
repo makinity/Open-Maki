@@ -118,12 +118,26 @@ class AssistantSpeechIntegrationTests(unittest.TestCase):
     @patch("app.assistant.load_knowledge_text", return_value="Preferred title: Sir")
     @patch("app.assistant.load_app_registry", return_value={"apps": {}, "folders": {}})
     @patch("app.assistant.add_history_entry")
+    @patch(
+        "app.assistant.parse_intent_with_llm",
+        return_value=None,
+    )
+    @patch(
+        "app.assistant.parse_intent",
+        return_value={
+            "intent": "unknown",
+            "target": "",
+            "raw_text": "tell me about yourself",
+        },
+    )
     @patch("app.assistant.route_command")
     @patch("app.assistant.build_chat_reply", return_value="Of course, sir. I can help with that.")
     def test_conversation_mode_uses_chat_reply_for_unknown_input(
         self,
         mock_build_chat_reply,
         mock_route_command,
+        mock_parse_intent,
+        mock_parse_intent_with_llm,
         mock_add_history_entry,
         mock_load_app_registry,
         mock_load_knowledge_text,
@@ -143,6 +157,8 @@ class AssistantSpeechIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result["message"], "Of course, sir. I can help with that.")
         mock_build_chat_reply.assert_called_once()
+        mock_parse_intent.assert_called_once_with("tell me about yourself")
+        mock_parse_intent_with_llm.assert_called_once()
         mock_add_history_entry.assert_called_once()
         mock_load_app_registry.assert_called_once()
 

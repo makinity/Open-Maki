@@ -25,10 +25,10 @@ def get_llm_provider(preferred_provider: str | None = None) -> Literal["xai", "g
     if normalized_provider == "groq":
         return "groq"
 
-    if _has_any_env_value(XAI_API_KEY_ENV_NAMES):
-        return "xai"
     if _has_any_env_value(GROQ_API_KEY_ENV_NAMES):
         return "groq"
+    if _has_any_env_value(XAI_API_KEY_ENV_NAMES):
+        return "xai"
     return ""
 
 

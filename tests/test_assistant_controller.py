@@ -19,6 +19,25 @@ class AssistantControllerUiTests(unittest.TestCase):
     @patch("app.controllers.assistant_controller.load_knowledge_profile", return_value={})
     @patch("app.controllers.assistant_controller.load_knowledge_text", return_value="")
     @patch("app.controllers.assistant_controller.load_app_registry", return_value={"apps": {}, "folders": {}})
+    def test_build_ready_message_defaults_to_owner_greeting(
+        self,
+        mock_load_app_registry,
+        mock_load_knowledge_text,
+        mock_load_knowledge_profile,
+    ) -> None:
+        """Startup prompts should greet the owner even without a custom profile entry."""
+        controller = AssistantController(settings=dict(_TEST_SETTINGS))
+
+        message = controller._build_ready_message()
+
+        self.assertEqual(message, "Good day, sir. Ready. Say or type a command.")
+        mock_load_app_registry.assert_called_once()
+        mock_load_knowledge_text.assert_called_once()
+        mock_load_knowledge_profile.assert_called_once()
+
+    @patch("app.controllers.assistant_controller.load_knowledge_profile", return_value={})
+    @patch("app.controllers.assistant_controller.load_knowledge_text", return_value="")
+    @patch("app.controllers.assistant_controller.load_app_registry", return_value={"apps": {}, "folders": {}})
     @patch("app.controllers.assistant_controller.add_history_entry")
     @patch(
         "app.controllers.assistant_controller.route_command",

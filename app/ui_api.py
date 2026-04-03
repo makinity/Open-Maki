@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from threading import Lock
+from threading import Event, Lock, Thread
 from typing import Any
 
 from app.config import BOT_NAME
@@ -11,6 +11,84 @@ from app.controllers.assistant_controller import AssistantController
 from app.speech.listen import listen
 from app.speech.speak import speak
 from app.utils.helpers import normalize_text
+
+
+class _VoiceStandbySession:
+    """Run one background listen cycle at a time for the desktop UI."""
+
+    def __init__(
+        self,
+        process_once: Any,
+        logger: Any | None = None,
+        idle_delay_seconds: float = 0.35,
+        paused_delay_seconds: float = 0.2,
+    ) -> None:
+        self._process_once = process_once
+        self._logger = logger
+        self._idle_delay_seconds = max(0.05, float(idle_delay_seconds))
+        self._paused_delay_seconds = max(0.05, float(paused_delay_seconds))
+        self._enabled = False
+        self._enabled_lock = Lock()
+        self._wake_event = Event()
+        self._stop_event = Event()
+        self._thread: Thread | None = None
+
+    def start(self) -> None:
+        """Start the background standby loop."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._thread = Thread(
+            target=self._run,
+            name="maki-ui-voice-standby",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self, timeout_seconds: float = 1.0) -> None:
+        """Stop the background standby loop."""
+        self.disable()
+        self._stop_event.set()
+        self._wake_event.set()
+
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=max(0.1, float(timeout_seconds)))
+
+    def enable(self) -> None:
+        """Enable background voice standby."""
+        with self._enabled_lock:
+            self._enabled = True
+        self._wake_event.set()
+
+    def disable(self) -> None:
+        """Pause background voice standby."""
+        with self._enabled_lock:
+            self._enabled = False
+        self._wake_event.set()
+
+    def is_enabled(self) -> bool:
+        """Return the current background standby state."""
+        with self._enabled_lock:
+            return self._enabled
+
+    def _run(self) -> None:
+        """Process standby turns until the session is stopped."""
+        while not self._stop_event.is_set():
+            if not self.is_enabled():
+                self._wake_event.wait(self._paused_delay_seconds)
+                self._wake_event.clear()
+                continue
+
+            try:
+                self._process_once()
+            except Exception as error:  # pragma: no cover - defensive fallback
+                if self._logger is not None:
+                    self._logger.warning("Voice standby loop failed: %s", error)
+                self.disable()
+
+            if self._stop_event.wait(self._idle_delay_seconds):
+                break
 
 
 class MakiUIApi:
@@ -28,8 +106,14 @@ class MakiUIApi:
         self.bot_name = str(self.settings.get("bot_name", inherited_bot_name or BOT_NAME))
         self._assistant_controller = assistant_controller
         self._lock = Lock()
+        self._interaction_lock = Lock()
         self._mic_active = False
-        self._auto_listen_enabled = True
+        self._auto_listen_enabled = False
+        self._voice_session = _VoiceStandbySession(
+            process_once=self._process_voice_standby_turn,
+            logger=getattr(assistant_controller, "logger", None),
+        )
+        self._startup_announced = False
         self._status = self._build_status(
             "ready",
             f"{self.bot_name} desktop UI is ready.",
@@ -37,36 +121,51 @@ class MakiUIApi:
         self._recent_activity = [
             self._build_activity(
                 "system",
-                "Desktop UI ready. Voice standby starts automatically, or you can type a command.",
+                "Desktop UI ready. Voice standby will start automatically, or you can type a command.",
             )
         ]
 
     def get_bootstrap_data(self) -> dict[str, Any]:
         """Return the initial UI payload used during frontend startup."""
+        startup_message = ""
+        should_speak_startup = False
         with self._lock:
-            return {
-                "bot_name": self.bot_name,
-                "status": dict(self._status),
-                "activity": self._copy_activity(),
-                "mic_active": self._mic_active,
-                "auto_listen_enabled": self._auto_listen_enabled,
-            }
+            if not self._startup_announced:
+                self._startup_announced = True
+                startup_message = self._build_startup_message()
+                if startup_message:
+                    self._status = self._build_status("ready", startup_message)
+                    self._recent_activity.append(
+                        self._build_activity("assistant", startup_message)
+                    )
+                    should_speak_startup = True
+            snapshot = self._build_ui_snapshot_locked()
+
+        if should_speak_startup:
+            self._speak_response(startup_message)
+
+        return snapshot
+
+    def get_ui_state(self) -> dict[str, Any]:
+        """Return the latest UI state for polling updates."""
+        with self._lock:
+            return self._build_ui_snapshot_locked()
 
     def send_command(self, command: str) -> dict[str, Any]:
         """Accept one typed command and return a real assistant backend response."""
         normalized_command = normalize_text(str(command))
 
-        with self._lock:
+        with self._interaction_lock:
             if not normalized_command:
                 response = "Type a command before sending it to Maki."
-                self._status = self._build_status("error", response)
-                self._recent_activity.append(self._build_activity("system", response))
+                with self._lock:
+                    self._status = self._build_status("error", response)
+                    self._recent_activity.append(self._build_activity("system", response))
                 return {
                     "ok": False,
                     "command": "",
                     "response": response,
-                    "status": dict(self._status),
-                    "activity": self._copy_activity(),
+                    **self.get_ui_state(),
                     "meta": {
                         "result_status": "validation_error",
                         "requires_confirmation": False,
@@ -75,11 +174,12 @@ class MakiUIApi:
                     },
                 }
 
-            self._status = self._build_status(
-                "processing",
-                f"{self.bot_name} is processing your command.",
-            )
-            self._recent_activity.append(self._build_activity("user", normalized_command))
+            with self._lock:
+                self._status = self._build_status(
+                    "processing",
+                    f"{self.bot_name} is processing your command.",
+                )
+                self._recent_activity.append(self._build_activity("user", normalized_command))
 
             try:
                 result = self._get_assistant_controller().handle_text(
@@ -88,16 +188,16 @@ class MakiUIApi:
                 )
             except Exception as error:
                 response = "Something went wrong while sending that command to Maki."
-                self._status = self._build_status("error", response)
-                self._recent_activity.append(
-                    self._build_activity("system", f"{response} {error}")
-                )
+                with self._lock:
+                    self._status = self._build_status("error", response)
+                    self._recent_activity.append(
+                        self._build_activity("system", f"{response} {error}")
+                    )
                 return {
                     "ok": False,
                     "command": normalized_command,
                     "response": response,
-                    "status": dict(self._status),
-                    "activity": self._copy_activity(),
+                    **self.get_ui_state(),
                     "meta": {
                         "result_status": "error",
                         "requires_confirmation": False,
@@ -112,54 +212,50 @@ class MakiUIApi:
                 response = f"{self.bot_name} processed the command."
 
             meta = self._build_result_meta(result, result_data)
-            self._recent_activity.append(self._build_activity("assistant", response))
+            with self._lock:
+                self._recent_activity.append(self._build_activity("assistant", response))
+                self._status = self._build_status(
+                    self._get_status_state(result=result, meta=meta),
+                    response,
+                )
             self._speak_response(response)
-            self._status = self._build_status(
-                self._get_status_state(result=result, meta=meta),
-                response,
-            )
             return {
                 "ok": bool(result.get("success", False)),
                 "command": normalized_command,
                 "response": response,
-                "status": dict(self._status),
-                "activity": self._copy_activity(),
+                **self.get_ui_state(),
                 "meta": meta,
             }
 
-    def toggle_mic(self, silent_empty_results: bool = False) -> dict[str, Any]:
-        """Capture one voice command from the desktop UI and process it."""
+    def start_voice_standby(self) -> dict[str, Any]:
+        """Start the Python-side voice standby worker for the desktop UI."""
         with self._lock:
-            self._mic_active = True
-            self._status = self._build_status("listening", "Listening for your command.")
+            self._auto_listen_enabled = True
+            if not self._mic_active:
+                self._status = self._build_status("ready", "Voice standby is active.")
+            snapshot = self._build_ui_snapshot_locked()
 
-            try:
-                payload = listen(
-                    settings=self._build_ui_listen_settings(),
-                    logger=getattr(self._get_assistant_controller(), "logger", None),
-                )
-            except Exception as error:
-                self._mic_active = False
-                response = "Voice input is unavailable right now."
-                self._status = self._build_status("error", response)
-                self._recent_activity.append(
-                    self._build_activity("system", f"{response} {error}")
-                )
-                return {
-                    "ok": False,
-                    "command": "",
-                    "response": response,
-                    "mic_active": self._mic_active,
-                    "status": dict(self._status),
-                    "activity": self._copy_activity(),
-                    "meta": self._build_listen_meta("voice_unavailable", "voice"),
-                }
+        self._voice_session.start()
+        self._voice_session.enable()
+        return snapshot
 
-            self._mic_active = False
-            return self._handle_listen_payload(
-                payload,
-                silent_empty_results=bool(silent_empty_results),
-            )
+    def toggle_mic(self) -> dict[str, Any]:
+        """Pause or resume Python-side voice standby for the desktop UI."""
+        if self._auto_listen_enabled or self._mic_active:
+            with self._lock:
+                self._auto_listen_enabled = False
+                if self._mic_active:
+                    self._status = self._build_status(
+                        "listening",
+                        "Voice standby will pause after this listen.",
+                    )
+                else:
+                    self._status = self._build_status("ready", "Voice standby is paused.")
+                snapshot = self._build_ui_snapshot_locked()
+            self._voice_session.disable()
+            return snapshot
+
+        return self.start_voice_standby()
 
     def get_status(self) -> dict[str, str]:
         """Return the current UI status label and state."""
@@ -171,6 +267,10 @@ class MakiUIApi:
         with self._lock:
             return self._copy_activity()
 
+    def close(self) -> None:
+        """Stop any background UI worker threads."""
+        self._voice_session.stop()
+
     def _get_assistant_controller(self) -> AssistantController:
         """Return a persistent assistant controller for UI-issued commands."""
         if self._assistant_controller is None:
@@ -181,18 +281,94 @@ class MakiUIApi:
         return self._assistant_controller
 
     def _build_ui_listen_settings(self) -> dict[str, Any]:
-        """Return one-shot listen settings for the desktop UI mic button."""
+        """Return one-shot listen settings for the desktop UI standby worker."""
         assistant_controller = self._get_assistant_controller()
         listen_settings = dict(getattr(assistant_controller, "settings", self.settings))
         listen_settings["speech_input_enabled"] = True
         listen_settings["console_fallback_enabled"] = False
         listen_settings["wake_word_enabled"] = False
         listen_settings["console_wake_word_optional"] = False
+        try:
+            timeout_seconds = int(listen_settings.get("voice_timeout_seconds", 2))
+        except (TypeError, ValueError):
+            timeout_seconds = 2
+        listen_settings["voice_timeout_seconds"] = max(1, min(timeout_seconds, 2))
         return listen_settings
+
+    def _build_ui_snapshot_locked(self) -> dict[str, Any]:
+        """Return the current frontend snapshot while the state lock is held."""
+        return {
+            "bot_name": self.bot_name,
+            "status": dict(self._status),
+            "activity": self._copy_activity(),
+            "mic_active": self._mic_active,
+            "auto_listen_enabled": self._auto_listen_enabled,
+        }
+
+    def _build_startup_message(self) -> str:
+        """Return the spoken startup greeting for the desktop UI bootstrap."""
+        assistant_controller = self._get_assistant_controller()
+        build_ready_message = getattr(assistant_controller, "_build_ready_message", None)
+        if callable(build_ready_message):
+            startup_message = normalize_text(str(build_ready_message()))
+            if startup_message:
+                return startup_message
+
+        return f"Good day, sir. {self.bot_name} desktop UI is ready."
 
     def _copy_activity(self) -> list[dict[str, str]]:
         """Return a shallow copy of the current activity list."""
         return [dict(item) for item in self._recent_activity]
+
+    def _process_voice_standby_turn(self) -> None:
+        """Capture and process one background voice-standby turn."""
+        if not self._interaction_lock.acquire(blocking=False):
+            return
+
+        try:
+            with self._lock:
+                if not self._auto_listen_enabled:
+                    return
+
+                self._mic_active = True
+                self._status = self._build_status("listening", "Listening for your command.")
+
+            try:
+                payload = listen(
+                    settings=self._build_ui_listen_settings(),
+                    logger=getattr(self._get_assistant_controller(), "logger", None),
+                )
+            except Exception as error:
+                self._voice_session.disable()
+                with self._lock:
+                    self._mic_active = False
+                    self._auto_listen_enabled = False
+                    response = "Voice standby is unavailable right now."
+                    self._status = self._build_status("error", response)
+                    self._recent_activity.append(
+                        self._build_activity("system", f"{response} {error}")
+                    )
+                return
+
+            with self._lock:
+                self._mic_active = False
+
+            result_payload = self._handle_listen_payload(
+                payload,
+                silent_empty_results=True,
+            )
+            result_meta = result_payload.get("meta", {})
+            result_status = str(result_meta.get("result_status", "")).strip().lower()
+            if bool(result_meta.get("should_exit", False)) or result_status in {
+                "error",
+                "voice_request_error",
+                "voice_unavailable",
+            }:
+                self._voice_session.disable()
+                with self._lock:
+                    self._auto_listen_enabled = False
+        finally:
+            self._interaction_lock.release()
 
     def _speak_response(self, response: str) -> None:
         """Send one UI assistant response through the existing speech output path."""
@@ -217,7 +393,8 @@ class MakiUIApi:
         status = normalize_text(str(payload.get("status", "empty"))).lower() or "empty"
 
         if recognized_text:
-            self._recent_activity.append(self._build_activity("user", recognized_text))
+            with self._lock:
+                self._recent_activity.append(self._build_activity("user", recognized_text))
             try:
                 result = self._get_assistant_controller().handle_text(
                     recognized_text,
@@ -225,17 +402,16 @@ class MakiUIApi:
                 )
             except Exception as error:
                 response = "Something went wrong while handling that voice command."
-                self._status = self._build_status("error", response)
-                self._recent_activity.append(
-                    self._build_activity("system", f"{response} {error}")
-                )
+                with self._lock:
+                    self._status = self._build_status("error", response)
+                    self._recent_activity.append(
+                        self._build_activity("system", f"{response} {error}")
+                    )
                 return {
                     "ok": False,
                     "command": recognized_text,
                     "response": response,
-                    "mic_active": self._mic_active,
-                    "status": dict(self._status),
-                    "activity": self._copy_activity(),
+                    **self.get_ui_state(),
                     "meta": self._build_listen_meta("error", source),
                 }
 
@@ -245,19 +421,18 @@ class MakiUIApi:
                 response = f"{self.bot_name} processed the voice command."
 
             meta = self._build_result_meta(result, result_data, source=source)
-            self._recent_activity.append(self._build_activity("assistant", response))
+            with self._lock:
+                self._recent_activity.append(self._build_activity("assistant", response))
+                self._status = self._build_status(
+                    self._get_status_state(result=result, meta=meta),
+                    response,
+                )
             self._speak_response(response)
-            self._status = self._build_status(
-                self._get_status_state(result=result, meta=meta),
-                response,
-            )
             return {
                 "ok": bool(result.get("success", False)),
                 "command": recognized_text,
                 "response": response,
-                "mic_active": self._mic_active,
-                "status": dict(self._status),
-                "activity": self._copy_activity(),
+                **self.get_ui_state(),
                 "meta": meta,
             }
 
@@ -269,30 +444,28 @@ class MakiUIApi:
             "voice_unrecognized",
             "wake_word_only",
         }:
-            self._status = self._build_status("ready", "Voice standby is active.")
+            with self._lock:
+                self._status = self._build_status("ready", "Voice standby is active.")
             return {
                 "ok": False,
                 "command": "",
                 "response": response,
-                "mic_active": self._mic_active,
-                "status": dict(self._status),
-                "activity": self._copy_activity(),
+                **self.get_ui_state(),
                 "meta": self._build_listen_meta(status, source),
             }
 
-        self._status = self._build_status(
-            "error" if status in {"voice_request_error", "voice_unavailable"} else "ready",
-            response,
-        )
-        self._recent_activity.append(self._build_activity("system", response))
+        with self._lock:
+            self._status = self._build_status(
+                "error" if status in {"voice_request_error", "voice_unavailable"} else "ready",
+                response,
+            )
+            self._recent_activity.append(self._build_activity("system", response))
         self._speak_response(response)
         return {
             "ok": False,
             "command": "",
             "response": response,
-            "mic_active": self._mic_active,
-            "status": dict(self._status),
-            "activity": self._copy_activity(),
+            **self.get_ui_state(),
             "meta": self._build_listen_meta(status, source),
         }
 

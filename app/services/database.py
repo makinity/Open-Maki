@@ -562,14 +562,13 @@ def _seed_app_alias_tables(connection: Any) -> None:
     from app.models.app_aliases import BUILTIN_APP_ENTRIES
     from app.models.folder_aliases import BUILTIN_FOLDER_ENTRIES
 
-    if _count_rows(connection, "app_aliases") == 0:
-        for entry in BUILTIN_APP_ENTRIES:
-            _insert_app_alias_entry(
-                connection,
-                name=str(entry.get("name", "")),
-                command=entry.get("command"),
-                aliases=entry.get("aliases", []),
-            )
+    for entry in BUILTIN_APP_ENTRIES:
+        _insert_app_alias_entry(
+            connection,
+            name=str(entry.get("name", "")),
+            command=entry.get("command"),
+            aliases=entry.get("aliases", []),
+        )
 
     if _count_rows(connection, "folder_aliases") == 0:
         for entry in BUILTIN_FOLDER_ENTRIES:
@@ -582,7 +581,7 @@ def _seed_app_alias_tables(connection: Any) -> None:
 
 
 def _insert_app_alias_entry(connection: Any, name: str, command: Any, aliases: Any) -> None:
-    """Insert or replace one app alias entry across all of its aliases."""
+    """Insert any missing built-in app aliases without overwriting existing rows."""
     normalized_name = str(name).strip()
     normalized_command = _normalize_command(command)
     if not normalized_name or normalized_command is None:
@@ -593,7 +592,7 @@ def _insert_app_alias_entry(connection: Any, name: str, command: Any, aliases: A
     for alias in alias_values:
         cursor.execute(
             """
-            REPLACE INTO app_aliases (alias, name, command_json, enabled)
+            INSERT IGNORE INTO app_aliases (alias, name, command_json, enabled)
             VALUES (%s, %s, %s, %s)
             """,
             (
@@ -728,3 +727,5 @@ def _extract_aliases(raw_aliases: Any) -> set[str]:
 
 
 # TODO: Add helper functions for updating command tables from an admin interface.
+
+

@@ -50,10 +50,10 @@ class ConfigPackageTests(unittest.TestCase):
         self.assertTrue(get_env_bool("EXAMPLE_BOOL", False))
 
     @patch.dict(os.environ, {"XAI_API_KEY": "xai-key", "GROQ_API_KEY": "groq-key"}, clear=False)
-    def test_get_llm_provider_prefers_xai_when_both_keys_exist(self) -> None:
-        """Auto provider resolution should prefer xAI over Groq when both are configured."""
-        self.assertEqual(get_llm_provider(), "xai")
-        self.assertEqual(get_llm_api_key(), "xai-key")
+    def test_get_llm_provider_prefers_groq_when_both_keys_exist(self) -> None:
+        """Auto provider resolution should prefer Groq when both providers are configured."""
+        self.assertEqual(get_llm_provider(), "groq")
+        self.assertEqual(get_llm_api_key(), "groq-key")
 
     @patch.dict(os.environ, {"XAI_API_KEY": "", "GROK_API_KEY": "legacy-key", "GROQ_API_KEY": ""}, clear=False)
     def test_get_llm_provider_supports_legacy_grok_names(self) -> None:

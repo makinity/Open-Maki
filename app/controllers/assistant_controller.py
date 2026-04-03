@@ -242,7 +242,7 @@ class AssistantController:
         if preferred_title:
             return f"Hello, {preferred_title}. {ready_message}".strip()
 
-        return ready_message
+        return f"Good day, sir. {ready_message}".strip()
 
     def _should_use_voice_prompts(self) -> bool:
         """Return True when assistant prompts should follow normal speech output."""

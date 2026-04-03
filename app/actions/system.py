@@ -1,4 +1,4 @@
-﻿"""System actions for time, date, help text, exit, and power commands."""
+"""System actions for time, date, help text, exit, and power commands."""
 
 import os
 import subprocess
@@ -10,6 +10,8 @@ from app.utils.helpers import build_result
 
 COMMAND_HELP: dict[str, str] = {
     "open_app": "Open a known desktop application, for example 'open notepad'.",
+    "close_app": "Close a known desktop application, for example 'close camera' or 'close chrome'.",
+    "take_picture": "Capture one photo from the default camera and save it under public/uploads/camera.",
     "open_website": "Open a website alias or URL, for example 'go to youtube'.",
     "search_website": "Search any website that has a search URL template in MySQL, for example 'search github for makibot'.",
     "search_google": "Search Google, for example 'google python decorators'.",
@@ -67,7 +69,7 @@ def list_commands() -> dict[str, Any]:
 def help_command() -> dict[str, Any]:
     """Return a short help summary with the supported command list."""
     result = list_commands()
-    result["message"] = "I can open apps and websites, search the web, manage folders, list available voices, tell the time and date, and handle safe system requests."
+    result["message"] = "I can open and close apps, open websites, search the web, manage folders, list available voices, tell the time and date, take pictures with the camera, and handle safe system requests."
     return result
 
 

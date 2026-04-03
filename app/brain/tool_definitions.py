@@ -12,6 +12,7 @@ SELECT_INTENT_TOOL_NAME = "select_intent"
 
 TARGET_REQUIRED_INTENTS = {
     "open_app",
+    "close_app",
     "open_website",
     "search_website",
     "search_google",
@@ -31,6 +32,7 @@ FIXED_TARGET_INTENTS = {
 }
 
 NO_TARGET_INTENTS = {
+    "take_picture",
     "tell_time",
     "tell_date",
     "list_commands",

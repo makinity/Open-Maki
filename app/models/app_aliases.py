@@ -3,7 +3,6 @@
 from typing import Any
 
 from app.services.database import (
-    _count_rows,
     _deserialize_json,
     _fetch_rows,
     _serialize_json,
@@ -20,6 +19,11 @@ BUILTIN_APP_ENTRIES: list[dict[str, object]] = [
     {"name": "chrome", "aliases": ["chrome", "google chrome"], "command": ["chrome"]},
     {"name": "edge", "aliases": ["edge", "microsoft edge"], "command": ["msedge"]},
     {"name": "vscode", "aliases": ["vscode", "visual studio code", "code"], "command": ["code"]},
+    {
+        "name": "camera",
+        "aliases": ["camera", "camera app", "webcam"],
+        "command": "microsoft.windows.camera:",
+    },
 ]
 
 
@@ -50,12 +54,9 @@ def load_app_alias_entries() -> list[dict[str, Any]]:
 
 
 def seed_builtin_app_aliases(connection: Any) -> None:
-    """Seed app aliases from built-in defaults when the table is empty."""
-    if _count_rows(connection, "app_aliases") > 0:
-        return
-
+    """Backfill any missing built-in app aliases without overwriting user-defined rows."""
     for entry in BUILTIN_APP_ENTRIES:
-        insert_app_alias_entry(
+        insert_missing_app_alias_entry(
             connection,
             name=str(entry.get("name", "")),
             command=entry.get("command"),
@@ -76,6 +77,30 @@ def insert_app_alias_entry(connection: Any, name: str, command: Any, aliases: An
         cursor.execute(
             """
             REPLACE INTO app_aliases (alias, name, command_json, enabled)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                alias,
+                normalized_name,
+                _serialize_json(normalized_command),
+                True,
+            ),
+        )
+
+
+def insert_missing_app_alias_entry(connection: Any, name: str, command: Any, aliases: Any) -> None:
+    """Insert any missing app aliases without overwriting existing rows."""
+    normalized_name = str(name).strip()
+    normalized_command = _normalize_command(command)
+    if not normalized_name or normalized_command is None:
+        return
+
+    cursor = connection.cursor()
+    alias_values = _extract_aliases([normalized_name, *list(_extract_aliases(aliases))])
+    for alias in alias_values:
+        cursor.execute(
+            """
+            INSERT IGNORE INTO app_aliases (alias, name, command_json, enabled)
             VALUES (%s, %s, %s, %s)
             """,
             (

@@ -1,8 +1,5 @@
 (function () {
-    const AUTO_LISTEN_START_DELAY_MS = 700;
-    const AUTO_LISTEN_RETRY_DELAY_MS = 900;
-    const AUTO_LISTEN_IDLE_DELAY_MS = 1200;
-    const AUTO_LISTEN_ERROR_STATUSES = new Set(["error", "voice_request_error", "voice_unavailable"]);
+    const UI_STATE_POLL_INTERVAL_MS = 450;
 
     const state = {
         botName: "Maki",
@@ -11,13 +8,14 @@
             state: "ready",
         },
         micActive: false,
-        autoListenEnabled: true,
+        autoListenEnabled: false,
         commandBusy: false,
         activity: [],
         bridge: null,
         orb: null,
         openPanelId: null,
-        autoListenTimer: null,
+        pollTimer: null,
+        pollRequestActive: false,
     };
 
     const elements = {};
@@ -61,19 +59,6 @@
 
             if (event.key === "Escape") {
                 closeAllPanels();
-            }
-        });
-        elements.commandInput.addEventListener("focus", () => {
-            clearAutoListenTimer();
-        });
-        elements.commandInput.addEventListener("input", () => {
-            if (state.autoListenEnabled) {
-                scheduleAutoListen(AUTO_LISTEN_RETRY_DELAY_MS);
-            }
-        });
-        elements.commandInput.addEventListener("blur", () => {
-            if (state.autoListenEnabled) {
-                scheduleAutoListen(AUTO_LISTEN_RETRY_DELAY_MS);
             }
         });
 
@@ -122,14 +107,24 @@
         }
 
         try {
-            const payload = await state.bridge.get_bootstrap_data();
-            state.botName = payload.bot_name || state.botName;
-            state.status = payload.status || state.status;
-            state.activity = Array.isArray(payload.activity) ? payload.activity : [];
-            state.micActive = Boolean(payload.mic_active);
-            state.autoListenEnabled = payload.auto_listen_enabled !== false;
+            applyBackendState(await state.bridge.get_bootstrap_data());
             renderAll();
-            scheduleAutoListen(AUTO_LISTEN_START_DELAY_MS);
+            startStatePolling();
+
+            try {
+                applyBackendState(await state.bridge.start_voice_standby());
+            } catch (error) {
+                state.status = {
+                    label: "Voice standby could not start.",
+                    state: "error",
+                };
+                state.activity.push({
+                    type: "system",
+                    text: `Voice standby could not start: ${error.message || error}`,
+                    timestamp: nowTimestamp(),
+                });
+            }
+            renderAll();
         } catch (error) {
             state.status = {
                 label: "Desktop bridge unavailable. The UI could not load startup data.",
@@ -172,6 +167,41 @@
         });
     }
 
+    function startStatePolling() {
+        stopStatePolling();
+        state.pollTimer = window.setInterval(refreshUiState, UI_STATE_POLL_INTERVAL_MS);
+    }
+
+    function stopStatePolling() {
+        if (!state.pollTimer) {
+            return;
+        }
+
+        window.clearInterval(state.pollTimer);
+        state.pollTimer = null;
+    }
+
+    async function refreshUiState() {
+        if (!state.bridge || state.pollRequestActive) {
+            return;
+        }
+
+        state.pollRequestActive = true;
+        try {
+            applyBackendState(await state.bridge.get_ui_state());
+            renderAll();
+        } catch (error) {
+            state.status = {
+                label: "UI state refresh failed.",
+                state: "error",
+            };
+            renderAll();
+            stopStatePolling();
+        } finally {
+            state.pollRequestActive = false;
+        }
+    }
+
     async function handleSend() {
         const command = elements.commandInput.value.trim();
 
@@ -197,12 +227,10 @@
         }
 
         state.commandBusy = true;
-        clearAutoListenTimer();
         renderAll();
         try {
             const payload = await state.bridge.send_command(command);
-            state.status = payload.status || state.status;
-            state.activity = Array.isArray(payload.activity) ? payload.activity : state.activity;
+            applyBackendState(payload);
             if (payload.ok) {
                 elements.commandInput.value = "";
             }
@@ -221,17 +249,18 @@
         } finally {
             state.commandBusy = false;
             renderAll();
-            scheduleAutoListen(AUTO_LISTEN_IDLE_DELAY_MS);
         }
     }
 
     async function handleToggleMic() {
         if (!state.bridge) {
             state.autoListenEnabled = !state.autoListenEnabled;
-            state.micActive = state.autoListenEnabled;
+            state.micActive = false;
             state.status = {
-                label: "Desktop bridge unavailable. Voice standby is in preview mode only.",
-                state: state.autoListenEnabled ? "listening" : "error",
+                label: state.autoListenEnabled
+                    ? "Voice standby enabled in preview mode."
+                    : "Voice standby paused in preview mode.",
+                state: "ready",
             };
             state.activity.push({
                 type: "system",
@@ -244,25 +273,43 @@
             return;
         }
 
-        clearAutoListenTimer();
-        if (state.micActive) {
-            state.autoListenEnabled = false;
-            state.status = {
-                label: "Voice standby will pause after this listen.",
-                state: "listening",
-            };
+        try {
+            applyBackendState(await state.bridge.toggle_mic());
             renderAll();
-            openPanel("status-panel");
+        } catch (error) {
+            state.status = {
+                label: "Voice standby toggle failed.",
+                state: "error",
+            };
+            state.activity.push({
+                type: "system",
+                text: `Voice standby toggle failed: ${error.message || error}`,
+                timestamp: nowTimestamp(),
+            });
+            renderAll();
+        }
+    }
+
+    function applyBackendState(payload) {
+        if (!payload || typeof payload !== "object") {
             return;
         }
 
-        state.autoListenEnabled = !state.autoListenEnabled;
-        state.status = {
-            label: state.autoListenEnabled ? "Voice standby resumed." : "Voice standby paused.",
-            state: "ready",
-        };
-        renderAll();
-        scheduleAutoListen(150);
+        if (typeof payload.bot_name === "string" && payload.bot_name.trim()) {
+            state.botName = payload.bot_name.trim();
+        }
+        if (payload.status && typeof payload.status === "object") {
+            state.status = payload.status;
+        }
+        if (Array.isArray(payload.activity)) {
+            state.activity = payload.activity;
+        }
+        if (typeof payload.mic_active !== "undefined") {
+            state.micActive = Boolean(payload.mic_active);
+        }
+        if (typeof payload.auto_listen_enabled !== "undefined") {
+            state.autoListenEnabled = Boolean(payload.auto_listen_enabled);
+        }
     }
 
     function togglePanel(panelId) {
@@ -390,84 +437,9 @@
     }
 
     function syncControlState() {
-        const disableCommandControls = state.commandBusy || state.micActive;
-        elements.sendButton.disabled = disableCommandControls;
-        elements.commandInput.disabled = disableCommandControls;
+        elements.sendButton.disabled = state.commandBusy;
+        elements.commandInput.disabled = state.commandBusy;
         elements.micButton.disabled = false;
-    }
-
-    function clearAutoListenTimer() {
-        if (!state.autoListenTimer) {
-            return;
-        }
-
-        window.clearTimeout(state.autoListenTimer);
-        state.autoListenTimer = null;
-    }
-
-    function scheduleAutoListen(delayMs) {
-        clearAutoListenTimer();
-        if (!state.bridge || !state.autoListenEnabled || state.micActive || state.commandBusy) {
-            return;
-        }
-
-        state.autoListenTimer = window.setTimeout(() => {
-            state.autoListenTimer = null;
-            startAutoListenCycle();
-        }, delayMs);
-    }
-
-    async function startAutoListenCycle() {
-        if (!state.bridge || !state.autoListenEnabled || state.micActive || state.commandBusy) {
-            return;
-        }
-
-        if (shouldHoldAutoListen()) {
-            scheduleAutoListen(AUTO_LISTEN_RETRY_DELAY_MS);
-            return;
-        }
-
-        state.micActive = true;
-        state.status = {
-            label: "Listening for your command.",
-            state: "listening",
-        };
-        renderAll();
-
-        try {
-            const payload = await state.bridge.toggle_mic(true);
-            const meta = payload.meta || {};
-            const resultStatus = String(meta.result_status || "");
-            state.micActive = Boolean(payload.mic_active);
-            state.status = payload.status || state.status;
-            state.activity = Array.isArray(payload.activity) ? payload.activity : state.activity;
-
-            if (Boolean(meta.should_exit) || AUTO_LISTEN_ERROR_STATUSES.has(resultStatus)) {
-                state.autoListenEnabled = false;
-            }
-            renderAll();
-        } catch (error) {
-            state.micActive = false;
-            state.autoListenEnabled = false;
-            state.status = {
-                label: "Voice standby failed.",
-                state: "error",
-            };
-            state.activity.push({
-                type: "system",
-                text: `Voice standby failed: ${error.message || error}`,
-                timestamp: nowTimestamp(),
-            });
-            renderAll();
-        } finally {
-            state.micActive = false;
-            renderAll();
-            scheduleAutoListen(AUTO_LISTEN_IDLE_DELAY_MS);
-        }
-    }
-
-    function shouldHoldAutoListen() {
-        return document.activeElement === elements.commandInput || Boolean(elements.commandInput.value.trim());
     }
 
     function titleCase(value) {

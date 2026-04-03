@@ -65,12 +65,24 @@ DEFAULT_COMMAND_PATTERNS: list[dict[str, object]] = [
     {"phrase_template": "go to folder {target}", "intent": "open_folder", "fixed_target": "", "priority": 131},
     {"phrase_template": "type {target}", "intent": "type_text", "fixed_target": "", "priority": 140},
     {"phrase_template": "write {target}", "intent": "type_text", "fixed_target": "", "priority": 141},
-    {"phrase_template": "open website {target}", "intent": "open_target", "fixed_target": "", "priority": 150},
-    {"phrase_template": "visit {target}", "intent": "open_target", "fixed_target": "", "priority": 151},
-    {"phrase_template": "go to {target}", "intent": "open_target", "fixed_target": "", "priority": 152},
-    {"phrase_template": "open {target}", "intent": "open_target", "fixed_target": "", "priority": 160},
-    {"phrase_template": "launch {target}", "intent": "open_target", "fixed_target": "", "priority": 161},
-    {"phrase_template": "start {target}", "intent": "open_target", "fixed_target": "", "priority": 162},
+    {"phrase_template": "take a picture", "intent": "take_picture", "fixed_target": "", "priority": 142},
+    {"phrase_template": "take picture", "intent": "take_picture", "fixed_target": "", "priority": 143},
+    {"phrase_template": "take a photo", "intent": "take_picture", "fixed_target": "", "priority": 144},
+    {"phrase_template": "take photo", "intent": "take_picture", "fixed_target": "", "priority": 145},
+    {"phrase_template": "capture a picture", "intent": "take_picture", "fixed_target": "", "priority": 146},
+    {"phrase_template": "capture a photo", "intent": "take_picture", "fixed_target": "", "priority": 147},
+    {"phrase_template": "open camera and take a picture", "intent": "take_picture", "fixed_target": "", "priority": 148},
+    {"phrase_template": "open the camera and take a picture", "intent": "take_picture", "fixed_target": "", "priority": 149},
+    {"phrase_template": "close app {target}", "intent": "close_app", "fixed_target": "", "priority": 153},
+    {"phrase_template": "close the app {target}", "intent": "close_app", "fixed_target": "", "priority": 154},
+    {"phrase_template": "close {target}", "intent": "close_app", "fixed_target": "", "priority": 155},
+    {"phrase_template": "close program {target}", "intent": "close_app", "fixed_target": "", "priority": 156},
+    {"phrase_template": "open website {target}", "intent": "open_target", "fixed_target": "", "priority": 160},
+    {"phrase_template": "visit {target}", "intent": "open_target", "fixed_target": "", "priority": 161},
+    {"phrase_template": "go to {target}", "intent": "open_target", "fixed_target": "", "priority": 162},
+    {"phrase_template": "open {target}", "intent": "open_target", "fixed_target": "", "priority": 170},
+    {"phrase_template": "launch {target}", "intent": "open_target", "fixed_target": "", "priority": 171},
+    {"phrase_template": "start {target}", "intent": "open_target", "fixed_target": "", "priority": 172},
 ]
 
 
@@ -120,3 +132,4 @@ def seed_default_command_patterns(connection: Any) -> None:
                 True,
             ),
         )
+

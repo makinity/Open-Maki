@@ -2,6 +2,8 @@
 
 SUPPORTED_INTENTS = {
     "open_app",
+    "close_app",
+    "take_picture",
     "open_website",
     "search_website",
     "search_google",
@@ -24,6 +26,8 @@ SUPPORTED_INTENTS = {
 
 LLM_ALLOWED_INTENTS = (
     "open_app",
+    "close_app",
+    "take_picture",
     "open_website",
     "search_website",
     "search_google",

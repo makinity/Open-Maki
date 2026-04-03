@@ -1,5 +1,6 @@
 """Tests for the desktop UI bridge scaffold."""
 
+import time
 import unittest
 from unittest.mock import patch
 
@@ -74,6 +75,9 @@ class _FakeAssistantController:
     def say(self, message: str, use_tts: bool = True) -> None:
         self.say_calls.append(message)
 
+    def _build_ready_message(self) -> str:
+        return "Good day, sir. Ready. Talk to me naturally or type a command."
+
 
 class MakiUIApiTests(unittest.TestCase):
     """Verify the in-memory bridge payloads for the desktop scaffold."""
@@ -89,8 +93,27 @@ class MakiUIApiTests(unittest.TestCase):
         self.assertEqual(payload["bot_name"], "Maki Prime")
         self.assertEqual(payload["status"]["state"], "ready")
         self.assertFalse(payload["mic_active"])
-        self.assertTrue(payload["auto_listen_enabled"])
+        self.assertFalse(payload["auto_listen_enabled"])
         self.assertEqual(payload["activity"][0]["type"], "system")
+
+    def test_get_bootstrap_data_speaks_startup_greeting_once(self) -> None:
+        """Bootstrap should speak the startup greeting once and keep it in activity."""
+        fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
+        api = MakiUIApi(assistant_controller=fake_controller)
+
+        first_payload = api.get_bootstrap_data()
+        second_payload = api.get_bootstrap_data()
+
+        self.assertEqual(
+            fake_controller.say_calls,
+            ["Good day, sir. Ready. Talk to me naturally or type a command."],
+        )
+        self.assertEqual(
+            first_payload["status"]["label"],
+            "Good day, sir. Ready. Talk to me naturally or type a command.",
+        )
+        self.assertEqual(first_payload["activity"][-1]["type"], "assistant")
+        self.assertEqual(second_payload["activity"][-1]["type"], "assistant")
 
     def test_send_command_rejects_empty_input(self) -> None:
         """Blank commands should return a friendly validation response."""
@@ -189,30 +212,47 @@ class MakiUIApiTests(unittest.TestCase):
         self.assertEqual(payload["activity"][-1]["type"], "system")
         self.assertIn("Something went wrong", payload["response"])
 
-    @patch(
-        "app.ui_api.listen",
-        return_value={
-            "text": "open chrome",
-            "source": "voice",
-            "used_fallback": False,
-            "status": "ok",
-        },
-    )
-    def test_toggle_mic_captures_voice_and_routes_it_to_the_backend(self, mock_listen) -> None:
-        """The mic button should capture one voice command and process it through the backend."""
+    @patch("app.ui_api.listen")
+    def test_start_voice_standby_processes_voice_in_background(self, mock_listen) -> None:
+        """Starting voice standby should process recognized speech in the background."""
+        responses = [
+            {
+                "text": "open chrome",
+                "source": "voice",
+                "used_fallback": False,
+                "status": "ok",
+            }
+        ]
+
+        def fake_listen(*args, **kwargs):
+            if responses:
+                return responses.pop(0)
+            return {
+                "text": "",
+                "source": "voice",
+                "used_fallback": False,
+                "status": "voice_timeout",
+            }
+
+        mock_listen.side_effect = fake_listen
+
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
-        payload = api.toggle_mic()
+        payload = api.start_voice_standby()
 
-        self.assertTrue(payload["ok"])
-        self.assertFalse(payload["mic_active"])
-        self.assertEqual(payload["command"], "open chrome")
-        self.assertEqual(payload["response"], "Opening chrome.")
-        self.assertEqual(payload["meta"]["source"], "voice")
-        self.assertEqual(payload["status"]["state"], "ready")
+        self.assertTrue(payload["auto_listen_enabled"])
+
+        deadline = time.time() + 1.0
+        while not fake_controller.calls and time.time() < deadline:
+            time.sleep(0.02)
+
         self.assertEqual(fake_controller.calls, [("open chrome", "voice")])
         self.assertEqual(fake_controller.say_calls, ["Opening chrome."])
+        latest_state = api.get_ui_state()
+        self.assertTrue(latest_state["auto_listen_enabled"])
+        self.assertIn(latest_state["status"]["state"], {"ready", "listening"})
 
         listen_settings = mock_listen.call_args.kwargs["settings"]
         self.assertTrue(listen_settings["speech_input_enabled"])
@@ -228,21 +268,26 @@ class MakiUIApiTests(unittest.TestCase):
             "status": "voice_timeout",
         },
     )
-    def test_toggle_mic_returns_ready_status_when_no_voice_is_captured(self, mock_listen) -> None:
-        """A voice timeout should return a nonfatal system message and keep the UI usable."""
+    def test_start_voice_standby_suppresses_empty_timeouts(self, mock_listen) -> None:
+        """Standby mode should not speak or log every empty timeout result."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
-        payload = api.toggle_mic()
+        payload = api.start_voice_standby()
 
-        self.assertFalse(payload["ok"])
-        self.assertFalse(payload["mic_active"])
-        self.assertEqual(payload["meta"]["result_status"], "voice_timeout")
-        self.assertEqual(payload["status"]["state"], "ready")
-        self.assertEqual(payload["response"], "I didn't hear anything.")
+        self.assertTrue(payload["auto_listen_enabled"])
+
+        deadline = time.time() + 0.6
+        while mock_listen.call_count == 0 and time.time() < deadline:
+            time.sleep(0.02)
+
+        latest_state = api.get_ui_state()
+        self.assertEqual(latest_state["status"]["state"], "ready")
+        self.assertEqual(latest_state["status"]["label"], "Voice standby is active.")
         self.assertEqual(fake_controller.calls, [])
-        self.assertEqual(fake_controller.say_calls, ["I didn't hear anything."])
-        self.assertEqual(payload["activity"][-1]["type"], "system")
+        self.assertEqual(fake_controller.say_calls, [])
+        self.assertEqual(len(latest_state["activity"]), 1)
 
     @patch(
         "app.ui_api.listen",
@@ -253,23 +298,24 @@ class MakiUIApiTests(unittest.TestCase):
             "status": "voice_timeout",
         },
     )
-    def test_toggle_mic_can_suppress_empty_voice_feedback_in_auto_mode(self, mock_listen) -> None:
-        """Auto-listen mode should not speak or log every empty timeout result."""
+    def test_toggle_mic_pauses_active_voice_standby(self, mock_listen) -> None:
+        """The mic button should pause the background standby worker."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
-        payload = api.toggle_mic(silent_empty_results=True)
+        api.start_voice_standby()
+        deadline = time.time() + 0.4
+        while mock_listen.call_count == 0 and time.time() < deadline:
+            time.sleep(0.02)
 
-        self.assertFalse(payload["ok"])
-        self.assertFalse(payload["mic_active"])
-        self.assertEqual(payload["meta"]["result_status"], "voice_timeout")
-        self.assertEqual(payload["status"]["state"], "ready")
-        self.assertEqual(payload["status"]["label"], "Voice standby is active.")
-        self.assertEqual(payload["response"], "I didn't hear anything.")
-        self.assertEqual(fake_controller.calls, [])
-        self.assertEqual(fake_controller.say_calls, [])
-        self.assertEqual(len(payload["activity"]), 1)
-        mock_listen.assert_called_once()
+        payload = api.toggle_mic()
+
+        self.assertFalse(payload["auto_listen_enabled"])
+        self.assertIn(
+            payload["status"]["label"],
+            {"Voice standby is paused.", "Voice standby will pause after this listen."},
+        )
 
 
 if __name__ == "__main__":

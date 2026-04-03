@@ -2,7 +2,7 @@
 
 from typing import Any, Callable
 
-from app.actions.apps import open_app
+from app.actions.apps import close_app, open_app, take_picture
 from app.actions.files import create_folder, open_folder
 from app.actions.system import (
     exit_bot,
@@ -63,6 +63,8 @@ def _dispatch_intent(
     """Dispatch the already validated intent to a concrete action."""
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
         "open_app": lambda: open_app(target, app_registry),
+        "close_app": lambda: close_app(target, app_registry),
+        "take_picture": lambda: take_picture(settings=settings),
         "open_website": lambda: open_website(target),
         "search_website": lambda: search_website(site, target),
         "search_google": lambda: search_google(target),

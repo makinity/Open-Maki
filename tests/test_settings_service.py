@@ -53,7 +53,11 @@ class SettingsServiceTests(unittest.TestCase):
         self.assertEqual(settings["tts_rate"], 10)
         self.assertEqual(settings["tts_volume"], 0)
 
-    @patch.dict("os.environ", {"XAI_API_KEY": "test-key"}, clear=False)
+    @patch.dict(
+        "os.environ",
+        {"XAI_API_KEY": "test-key", "GROQ_API_KEY": "", "GROK_API_KEY": ""},
+        clear=False,
+    )
     def test_validate_settings_auto_enables_llm_with_xai_api_key(self) -> None:
         """LLM parsing should auto-enable when an API key is available."""
         settings = validate_settings({})
@@ -72,6 +76,19 @@ class SettingsServiceTests(unittest.TestCase):
     @patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}, clear=False)
     def test_validate_settings_uses_groq_defaults_when_groq_key_is_present(self) -> None:
         """Groq-backed setups should default to a Groq-compatible model."""
+        settings = validate_settings({})
+
+        self.assertEqual(settings["llm_provider"], "auto")
+        self.assertTrue(settings["llm_parser_enabled"])
+        self.assertEqual(settings["llm_model"], DEFAULT_GROQ_LLM_MODEL)
+
+    @patch.dict(
+        "os.environ",
+        {"XAI_API_KEY": "xai-key", "GROQ_API_KEY": "groq-key", "GROK_API_KEY": ""},
+        clear=False,
+    )
+    def test_validate_settings_prefers_groq_when_both_provider_keys_exist(self) -> None:
+        """Auto settings should resolve to a Groq-compatible model when both keys exist."""
         settings = validate_settings({})
 
         self.assertEqual(settings["llm_provider"], "auto")
