@@ -1,4 +1,4 @@
-"""Application actions for safely opening and closing desktop apps."""
+"""Application and media actions for safely opening apps and capturing local media."""
 
 from __future__ import annotations
 
@@ -19,11 +19,29 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     cv2 = None
 
+try:
+    import mss
+    from mss import tools as mss_tools
+except Exception:  # pragma: no cover - optional dependency
+    mss = None
+    mss_tools = None
+
+try:
+    from PIL import ImageGrab
+except Exception:  # pragma: no cover - optional dependency
+    ImageGrab = None
+
+try:
+    import pyautogui
+except Exception:  # pragma: no cover - optional dependency
+    pyautogui = None
+
 _WINDOWS_PROTOCOL_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 _DEFAULT_CAMERA_DEVICE_INDEX = 0
 _DEFAULT_CAMERA_WARMUP_FRAMES = 3
 _MAX_CAMERA_WARMUP_FRAMES = 6
 _CAMERA_OUTPUT_DIR = PUBLIC_UPLOADS_DIR / "camera"
+_SCREENSHOT_OUTPUT_DIR = PUBLIC_UPLOADS_DIR / "screenshots"
 _BUILTIN_CLOSE_PROCESS_NAMES: dict[str, list[str]] = {
     "camera": ["WindowsCamera.exe"],
     "camera app": ["WindowsCamera.exe"],
@@ -182,7 +200,10 @@ def take_picture(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         maximum=_MAX_CAMERA_WARMUP_FRAMES,
     )
 
-    output_dir = _resolve_output_dir(settings.get("camera_output_dir"))
+    output_dir = _resolve_output_dir(
+        settings.get("camera_output_dir"),
+        default=_CAMERA_OUTPUT_DIR,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / _build_photo_filename()
 
@@ -225,6 +246,44 @@ def take_picture(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         {
             "status": "completed",
             "target": "camera",
+            "path": str(output_path),
+        },
+    )
+
+
+def take_screenshot(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Capture one full-screen screenshot and save it under public/uploads."""
+    settings = settings or {}
+    if not _can_capture_screenshot():
+        return build_result(
+            False,
+            "Taking a screenshot requires mss, Pillow ImageGrab, or pyautogui. Install one of them, then try again.",
+            {"status": "dependency_missing", "target": "screen"},
+        )
+
+    output_dir = _resolve_output_dir(
+        settings.get("screenshot_output_dir"),
+        default=_SCREENSHOT_OUTPUT_DIR,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / _build_screenshot_filename()
+
+    try:
+        _capture_screenshot_to_path(output_path)
+    except Exception as error:
+        return build_result(
+            False,
+            f"I could not capture a screenshot: {error}",
+            {"status": "capture_failed", "target": "screen"},
+        )
+
+    relative_path = _format_display_path(output_path)
+    return build_result(
+        True,
+        f"I took a screenshot and saved it to {relative_path}.",
+        {
+            "status": "completed",
+            "target": "screen",
             "path": str(output_path),
         },
     )
@@ -402,17 +461,58 @@ def _open_video_capture(camera_index: int) -> Any:
     return cv2.VideoCapture(camera_index)
 
 
-def _resolve_output_dir(raw_path: Any) -> Path:
-    """Return the camera output directory from settings or the default uploads folder."""
+def _select_screenshot_monitor(screenshotter: Any) -> Any:
+    """Return the full desktop monitor definition for screenshot capture."""
+    monitors = getattr(screenshotter, "monitors", None)
+    if isinstance(monitors, list) and monitors:
+        return monitors[0]
+
+    raise RuntimeError("No display monitor is available for screenshot capture.")
+
+
+def _can_capture_screenshot() -> bool:
+    """Return True when at least one screenshot backend is available."""
+    return (mss is not None and mss_tools is not None) or ImageGrab is not None or pyautogui is not None
+
+
+def _capture_screenshot_to_path(output_path: Path) -> None:
+    """Capture one screenshot using the best available backend."""
+    if mss is not None and mss_tools is not None:
+        with mss.mss() as screenshotter:
+            monitor = _select_screenshot_monitor(screenshotter)
+            screenshot = screenshotter.grab(monitor)
+            mss_tools.to_png(screenshot.rgb, screenshot.size, output=str(output_path))
+        return
+
+    if ImageGrab is not None:
+        screenshot_image = ImageGrab.grab()
+        screenshot_image.save(str(output_path))
+        return
+
+    if pyautogui is not None:
+        screenshot_image = pyautogui.screenshot()
+        screenshot_image.save(str(output_path))
+        return
+
+    raise RuntimeError("No screenshot backend is available.")
+
+
+def _resolve_output_dir(raw_path: Any, default: Path) -> Path:
+    """Return an output directory from settings or a feature-specific default folder."""
     if isinstance(raw_path, str) and raw_path.strip():
         return Path(raw_path.strip())
 
-    return _CAMERA_OUTPUT_DIR
+    return default
 
 
 def _build_photo_filename() -> str:
     """Return a timestamped filename for one captured photo."""
     return f"photo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+
+
+def _build_screenshot_filename() -> str:
+    """Return a timestamped filename for one captured screenshot."""
+    return f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
 
 
 def _format_display_path(path: Path) -> str:
@@ -443,3 +543,4 @@ def _coerce_int(
 
 
 # TODO: Add support for optional command arguments and explicit close metadata in registry entries.
+

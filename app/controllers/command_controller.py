@@ -2,7 +2,7 @@
 
 from typing import Any, Callable
 
-from app.actions.apps import close_app, open_app, take_picture
+from app.actions.apps import close_app, open_app, take_picture, take_screenshot
 from app.actions.files import create_folder, open_folder
 from app.actions.system import (
     exit_bot,
@@ -65,6 +65,7 @@ def _dispatch_intent(
         "open_app": lambda: open_app(target, app_registry),
         "close_app": lambda: close_app(target, app_registry),
         "take_picture": lambda: take_picture(settings=settings),
+        "take_screenshot": lambda: take_screenshot(settings=settings),
         "open_website": lambda: open_website(target),
         "search_website": lambda: search_website(site, target),
         "search_google": lambda: search_google(target),

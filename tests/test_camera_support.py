@@ -1,17 +1,17 @@
-"""Tests for camera alias, picture capture, and app close support."""
+"""Tests for screenshot, camera capture, and app close support."""
 
 import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from app.actions.apps import close_app, open_app, take_picture
+from app.actions.apps import close_app, open_app, take_picture, take_screenshot
 from app.brain.command_router import route_command
 from app.brain.intent_parser import parse_intent
 from app.models.app_aliases import BUILTIN_APP_ENTRIES
 
 
-class CameraSupportTests(unittest.TestCase):
-    """Verify camera aliases, picture capture, and app close support."""
+class MediaSupportTests(unittest.TestCase):
+    """Verify screenshot, camera capture, and app close support."""
 
     @patch("app.brain.intent_parser.load_command_patterns", return_value=[])
     @patch("app.brain.intent_parser.load_website_aliases", return_value={})
@@ -29,6 +29,27 @@ class CameraSupportTests(unittest.TestCase):
                 "intent": "take_picture",
                 "target": "",
                 "raw_text": "take a picture",
+            },
+        )
+        mock_load_command_patterns.assert_called_once_with()
+        mock_load_website_aliases.assert_called_once_with()
+
+    @patch("app.brain.intent_parser.load_command_patterns", return_value=[])
+    @patch("app.brain.intent_parser.load_website_aliases", return_value={})
+    def test_parse_take_screenshot_intent_uses_default_patterns(
+        self,
+        mock_load_website_aliases,
+        mock_load_command_patterns,
+    ) -> None:
+        """The rule parser should detect built-in screenshot phrases."""
+        intent = parse_intent("take a screenshot")
+
+        self.assertEqual(
+            intent,
+            {
+                "intent": "take_screenshot",
+                "target": "",
+                "raw_text": "take a screenshot",
             },
         )
         mock_load_command_patterns.assert_called_once_with()
@@ -163,6 +184,32 @@ class CameraSupportTests(unittest.TestCase):
         self.assertEqual(result["data"]["status"], "dependency_missing")
         self.assertIn("opencv-python", result["message"])
 
+    @patch("app.actions.apps.mss", None)
+    @patch("app.actions.apps.mss_tools", None)
+    @patch("app.actions.apps.ImageGrab", None)
+    @patch("app.actions.apps.pyautogui", None)
+    def test_take_screenshot_reports_missing_optional_dependency(self) -> None:
+        """Screenshot capture should fail cleanly when no screenshot backend is installed."""
+        result = take_screenshot()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["data"]["status"], "dependency_missing")
+        self.assertIn("ImageGrab", result["message"])
+
+    @patch("app.actions.apps.mss", None)
+    @patch("app.actions.apps.mss_tools", None)
+    def test_take_screenshot_falls_back_to_image_grab(self) -> None:
+        """Screenshot capture should fall back to Pillow ImageGrab when mss is unavailable."""
+        fake_image = MagicMock()
+        with patch("app.actions.apps.ImageGrab") as mock_image_grab:
+            mock_image_grab.grab.return_value = fake_image
+            result = take_screenshot()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"]["status"], "completed")
+        mock_image_grab.grab.assert_called_once_with()
+        fake_image.save.assert_called_once()
+
     @patch("app.brain.llm_intent_parser.load_website_aliases", return_value={})
     @patch(
         "app.brain.llm_intent_parser.request_intent_tool_call",
@@ -188,6 +235,36 @@ class CameraSupportTests(unittest.TestCase):
                 "intent": "take_picture",
                 "target": "",
                 "raw_text": "take a picture",
+            },
+        )
+        mock_request_intent_tool_call.assert_called_once()
+        mock_load_website_aliases.assert_called_once_with()
+
+    @patch("app.brain.llm_intent_parser.load_website_aliases", return_value={})
+    @patch(
+        "app.brain.llm_intent_parser.request_intent_tool_call",
+        return_value={"name": "select_intent", "arguments": {"intent": "take_screenshot"}},
+    )
+    def test_llm_parser_normalizes_take_screenshot_without_target(
+        self,
+        mock_request_intent_tool_call,
+        mock_load_website_aliases,
+    ) -> None:
+        """The optional LLM parser should normalize the targetless screenshot intent."""
+        from app.brain.llm_intent_parser import parse_intent_with_llm
+
+        intent = parse_intent_with_llm(
+            "take a screenshot",
+            settings={"llm_parser_enabled": True},
+            app_registry={"apps": {}, "folders": {}},
+        )
+
+        self.assertEqual(
+            intent,
+            {
+                "intent": "take_screenshot",
+                "target": "",
+                "raw_text": "take a screenshot",
             },
         )
         mock_request_intent_tool_call.assert_called_once()
@@ -235,7 +312,7 @@ class CameraSupportTests(unittest.TestCase):
         },
     )
     def test_route_take_picture_dispatches_to_camera_action(self, mock_take_picture) -> None:
-        """The command router should dispatch the new take-picture intent."""
+        """The command router should dispatch the take-picture intent."""
         result = route_command(
             {"intent": "take_picture", "target": "", "raw_text": "take a picture"},
             settings={"camera_device_index": 0},
@@ -246,6 +323,28 @@ class CameraSupportTests(unittest.TestCase):
         mock_take_picture.assert_called_once_with(settings={"camera_device_index": 0})
 
     @patch(
+        "app.brain.command_router.take_screenshot",
+        return_value={
+            "success": True,
+            "message": "I took a screenshot and saved it to public\\uploads\\screenshots\\screenshot_test.png.",
+            "data": {
+                "status": "completed",
+                "path": "C:/Python/MakiBot/public/uploads/screenshots/screenshot_test.png",
+            },
+        },
+    )
+    def test_route_take_screenshot_dispatches_to_media_action(self, mock_take_screenshot) -> None:
+        """The command router should dispatch the screenshot intent."""
+        result = route_command(
+            {"intent": "take_screenshot", "target": "", "raw_text": "take a screenshot"},
+            settings={},
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"]["status"], "completed")
+        mock_take_screenshot.assert_called_once_with(settings={})
+
+    @patch(
         "app.brain.command_router.close_app",
         return_value={
             "success": True,
@@ -254,7 +353,7 @@ class CameraSupportTests(unittest.TestCase):
         },
     )
     def test_route_close_app_dispatches_to_app_action(self, mock_close_app) -> None:
-        """The command router should dispatch the new close-app intent."""
+        """The command router should dispatch the close-app intent."""
         result = route_command(
             {"intent": "close_app", "target": "camera", "raw_text": "close camera"},
             app_registry={"apps": {}, "folders": {}},
@@ -267,3 +366,4 @@ class CameraSupportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

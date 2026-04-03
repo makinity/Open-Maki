@@ -33,6 +33,7 @@ FIXED_TARGET_INTENTS = {
 
 NO_TARGET_INTENTS = {
     "take_picture",
+    "take_screenshot",
     "tell_time",
     "tell_date",
     "list_commands",
