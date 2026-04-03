@@ -16,6 +16,8 @@ class _FakeAssistantController:
         self.calls: list[tuple[str, str]] = []
         self.say_calls: list[str] = []
         self._pending_shutdown = False
+        self.knowledge_profile = {"preferred_title": "Sir"}
+        self.knowledge_text = "Preferred title: Sir"
 
     def handle_text(self, text: str, source: str = "console") -> dict[str, object]:
         self.calls.append((text, source))
@@ -82,11 +84,11 @@ class _FakeAssistantController:
 class MakiUIApiTests(unittest.TestCase):
     """Verify the in-memory bridge payloads for the desktop scaffold."""
 
-    def test_get_bootstrap_data_returns_status_and_activity(self) -> None:
+    @patch("app.ui_api.build_startup_greeting", return_value=None)
+    def test_get_bootstrap_data_returns_status_and_activity(self, mock_build_startup_greeting) -> None:
         """Bootstrap data should include the bot name, status, and session activity."""
-        api = MakiUIApi(
-            assistant_controller=_FakeAssistantController(settings={"bot_name": "Maki Prime"})
-        )
+        fake_controller = _FakeAssistantController(settings={"bot_name": "Maki Prime"})
+        api = MakiUIApi(assistant_controller=fake_controller)
 
         payload = api.get_bootstrap_data()
 
@@ -95,8 +97,10 @@ class MakiUIApiTests(unittest.TestCase):
         self.assertFalse(payload["mic_active"])
         self.assertFalse(payload["auto_listen_enabled"])
         self.assertEqual(payload["activity"][0]["type"], "system")
+        mock_build_startup_greeting.assert_called_once()
 
-    def test_get_bootstrap_data_speaks_startup_greeting_once(self) -> None:
+    @patch("app.ui_api.build_startup_greeting", return_value="Good evening, Sir. It is good to have you back.")
+    def test_get_bootstrap_data_speaks_startup_greeting_once(self, mock_build_startup_greeting) -> None:
         """Bootstrap should speak the startup greeting once and keep it in activity."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
@@ -106,14 +110,20 @@ class MakiUIApiTests(unittest.TestCase):
 
         self.assertEqual(
             fake_controller.say_calls,
-            ["Good day, sir. Ready. Talk to me naturally or type a command."],
+            ["Good evening, Sir. It is good to have you back."],
         )
         self.assertEqual(
             first_payload["status"]["label"],
-            "Good day, sir. Ready. Talk to me naturally or type a command.",
+            "Good evening, Sir. It is good to have you back.",
         )
         self.assertEqual(first_payload["activity"][-1]["type"], "assistant")
         self.assertEqual(second_payload["activity"][-1]["type"], "assistant")
+        mock_build_startup_greeting.assert_called_once_with(
+            settings=fake_controller.settings,
+            knowledge_text="Preferred title: Sir",
+            knowledge_profile={"preferred_title": "Sir"},
+            logger=None,
+        )
 
     def test_send_command_rejects_empty_input(self) -> None:
         """Blank commands should return a friendly validation response."""

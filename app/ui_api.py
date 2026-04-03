@@ -8,6 +8,7 @@ from typing import Any
 
 from app.config import BOT_NAME
 from app.controllers.assistant_controller import AssistantController
+from app.services.chat_response_service import build_startup_greeting
 from app.speech.listen import listen
 from app.speech.speak import speak
 from app.utils.helpers import normalize_text
@@ -308,6 +309,15 @@ class MakiUIApi:
     def _build_startup_message(self) -> str:
         """Return the spoken startup greeting for the desktop UI bootstrap."""
         assistant_controller = self._get_assistant_controller()
+        dynamic_greeting = build_startup_greeting(
+            settings=getattr(assistant_controller, "settings", self.settings),
+            knowledge_text=str(getattr(assistant_controller, "knowledge_text", "")),
+            knowledge_profile=getattr(assistant_controller, "knowledge_profile", {}),
+            logger=getattr(assistant_controller, "logger", None),
+        )
+        if dynamic_greeting:
+            return dynamic_greeting
+
         build_ready_message = getattr(assistant_controller, "_build_ready_message", None)
         if callable(build_ready_message):
             startup_message = normalize_text(str(build_ready_message()))
@@ -315,7 +325,6 @@ class MakiUIApi:
                 return startup_message
 
         return f"Good day, sir. {self.bot_name} desktop UI is ready."
-
     def _copy_activity(self) -> list[dict[str, str]]:
         """Return a shallow copy of the current activity list."""
         return [dict(item) for item in self._recent_activity]
