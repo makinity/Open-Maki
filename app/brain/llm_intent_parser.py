@@ -64,7 +64,7 @@ def _build_messages(raw_text: str, app_registry: dict[str, Any] | None) -> list[
         "Choose exactly one supported tool call when the request matches an allowed action. "
         "If nothing matches, return no tool call. "
         "Never invent unsupported actions. "
-        "Use alias names as targets, not executable paths. "
+        "Use alias names as targets, not executable paths. For website requests, you may use a plain site or brand name as the target even when it is not already listed as a saved alias. "
         "For shutdown or restart requests, choose the exact corresponding intent."
         f"\nAllowed intents: {', '.join(LLM_ALLOWED_INTENTS)}."
         f"\nKnown app aliases: {', '.join(app_aliases) or 'none'}."
@@ -113,3 +113,4 @@ def _get_website_aliases() -> list[str]:
 
 
 # TODO: Include optional few-shot examples if Grok needs more reliable phrasing support.
+

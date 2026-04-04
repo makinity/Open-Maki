@@ -2,6 +2,7 @@
 
 import re
 
+from app.models.app_aliases import BUILTIN_APP_ENTRIES, load_app_alias_entries
 from app.models.command_patterns import DEFAULT_COMMAND_PATTERNS, load_command_patterns
 from app.models.website_aliases import (
     DEFAULT_WEBSITE_ENTRIES,
@@ -52,12 +53,18 @@ def parse_intent(text: str) -> dict[str, str]:
 
 
 def _build_open_target_intent(target: str, raw_text: str) -> dict[str, str]:
-    """Choose whether an open-style command targets a website or an app."""
+    """Choose whether an open-style command targets a website, app, or an ambiguous fallback."""
     normalized_target = target.lower()
+    if not normalized_target:
+        return _build_intent("unknown", target, raw_text)
+
     if looks_like_url(target) or normalized_target in _load_website_alias_map():
         return _build_intent("open_website", target, raw_text)
 
-    return _build_intent("open_app", target, raw_text)
+    if normalized_target in _load_app_alias_map():
+        return _build_intent("open_app", target, raw_text)
+
+    return _build_intent("unknown", target, raw_text)
 
 
 def _load_active_patterns() -> list[dict[str, object]]:
@@ -121,6 +128,27 @@ def _load_website_alias_map() -> dict[str, str]:
         return {alias: details["url"] for alias, details in website_entries.items()}
 
     return dict(WEBSITE_ALIASES)
+
+
+def _load_app_alias_map() -> set[str]:
+    """Return known app aliases from MySQL or the built-in config fallback."""
+    try:
+        app_entries = load_app_alias_entries()
+    except Exception:
+        app_entries = []
+
+    if app_entries:
+        return {str(entry.get("alias", "")).strip().lower() for entry in app_entries if str(entry.get("alias", "")).strip()}
+
+    builtin_aliases: set[str] = set()
+    for entry in BUILTIN_APP_ENTRIES:
+        builtin_aliases.add(str(entry.get("name", "")).strip().lower())
+        for alias in entry.get("aliases", []):
+            normalized_alias = normalize_text(str(alias)).lower()
+            if normalized_alias:
+                builtin_aliases.add(normalized_alias)
+
+    return builtin_aliases
 
 
 def _build_site_search_intent(site: str, query: str, raw_text: str) -> dict[str, str] | None:

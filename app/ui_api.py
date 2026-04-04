@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from queue import Empty, Queue
 from threading import Event, Lock, Thread
+from time import monotonic
 from typing import Any
 
 from app.config import BOT_NAME
@@ -92,6 +94,68 @@ class _VoiceStandbySession:
                 break
 
 
+class _SpeechPlaybackSession:
+    """Run assistant speech output on one background worker thread."""
+
+    def __init__(
+        self,
+        process_once: Any,
+        logger: Any | None = None,
+    ) -> None:
+        self._process_once = process_once
+        self._logger = logger
+        self._queue: Queue[str] = Queue()
+        self._stop_event = Event()
+        self._thread: Thread | None = None
+
+    def start(self) -> None:
+        """Start the background speech worker."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._thread = Thread(
+            target=self._run,
+            name="maki-ui-speech-playback",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def enqueue(self, response: str) -> None:
+        """Queue one assistant response for speech playback."""
+        cleaned_response = normalize_text(str(response))
+        if cleaned_response:
+            self._queue.put(cleaned_response)
+
+    def stop(self, timeout_seconds: float = 1.0) -> None:
+        """Stop the background speech worker."""
+        self._stop_event.set()
+        self._queue.put("")
+
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=max(0.1, float(timeout_seconds)))
+
+    def _run(self) -> None:
+        """Speak queued responses until the worker is stopped."""
+        while not self._stop_event.is_set():
+            try:
+                response = self._queue.get(timeout=0.2)
+            except Empty:
+                continue
+
+            if self._stop_event.is_set():
+                break
+
+            if not response:
+                continue
+
+            try:
+                self._process_once(response)
+            except Exception as error:  # pragma: no cover - defensive fallback
+                if self._logger is not None:
+                    self._logger.warning("Speech playback loop failed: %s", error)
+
+
 class MakiUIApi:
     """Expose a small, stable bridge for the desktop UI scaffold."""
 
@@ -114,7 +178,14 @@ class MakiUIApi:
             process_once=self._process_voice_standby_turn,
             logger=getattr(assistant_controller, "logger", None),
         )
+        self._speech_session = _SpeechPlaybackSession(
+            process_once=self._play_speech_response,
+            logger=getattr(assistant_controller, "logger", None),
+        )
+        self._speech_session.start()
         self._startup_announced = False
+        self._speaking_active = False
+        self._speaking_until = 0.0
         self._status = self._build_status(
             "ready",
             f"{self.bot_name} desktop UI is ready.",
@@ -144,6 +215,7 @@ class MakiUIApi:
 
         if should_speak_startup:
             self._speak_response(startup_message)
+            return self.get_ui_state()
 
         return snapshot
 
@@ -271,6 +343,7 @@ class MakiUIApi:
     def close(self) -> None:
         """Stop any background UI worker threads."""
         self._voice_session.stop()
+        self._speech_session.stop()
 
     def _get_assistant_controller(self) -> AssistantController:
         """Return a persistent assistant controller for UI-issued commands."""
@@ -304,6 +377,7 @@ class MakiUIApi:
             "activity": self._copy_activity(),
             "mic_active": self._mic_active,
             "auto_listen_enabled": self._auto_listen_enabled,
+            "speaking_active": self._is_speaking_locked(),
         }
 
     def _build_startup_message(self) -> str:
@@ -336,7 +410,7 @@ class MakiUIApi:
 
         try:
             with self._lock:
-                if not self._auto_listen_enabled:
+                if not self._auto_listen_enabled or self._speaking_active:
                     return
 
                 self._mic_active = True
@@ -380,16 +454,33 @@ class MakiUIApi:
             self._interaction_lock.release()
 
     def _speak_response(self, response: str) -> None:
+        """Queue one UI assistant response for background speech playback."""
+        if not response:
+            return
+
+        with self._lock:
+            self._speaking_active = True
+            self._speaking_until = 0.0
+
+        self._speech_session.start()
+        self._speech_session.enqueue(response)
+
+    def _play_speech_response(self, response: str) -> None:
         """Send one UI assistant response through the existing speech output path."""
         if not response:
             return
 
-        assistant_controller = self._assistant_controller
-        if assistant_controller is not None and hasattr(assistant_controller, "say"):
-            assistant_controller.say(response)
-            return
+        try:
+            assistant_controller = self._assistant_controller
+            if assistant_controller is not None and hasattr(assistant_controller, "say"):
+                assistant_controller.say(response)
+                return
 
-        speak(response, settings=self.settings)
+            speak(response, settings=self.settings)
+        finally:
+            with self._lock:
+                self._speaking_active = False
+                self._speaking_until = monotonic() + 0.55
 
     def _handle_listen_payload(
         self,
@@ -556,3 +647,7 @@ class MakiUIApi:
             "text": normalize_text(text),
             "timestamp": datetime.now().strftime("%H:%M:%S"),
         }
+
+    def _is_speaking_locked(self) -> bool:
+        """Return True while TTS is active or still within the UI grace window."""
+        return self._speaking_active or monotonic() < self._speaking_until

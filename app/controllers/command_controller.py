@@ -42,7 +42,7 @@ def route_command(
         return _build_confirmation_result(intent_name, target)
 
     try:
-        return _dispatch_intent(intent_name, target, site, settings, app_registry)
+        return _dispatch_intent(intent_name, target, site, settings, app_registry, logger)
     except Exception as error:
         if logger is not None:
             logger.exception("Command routing failed for intent '%s'.", intent_name)
@@ -59,6 +59,7 @@ def _dispatch_intent(
     site: str,
     settings: dict[str, Any],
     app_registry: dict[str, Any],
+    logger: Any | None,
 ) -> dict[str, Any]:
     """Dispatch the already validated intent to a concrete action."""
     handlers: dict[str, Callable[[], dict[str, Any]]] = {
@@ -66,7 +67,7 @@ def _dispatch_intent(
         "close_app": lambda: close_app(target, app_registry),
         "take_picture": lambda: take_picture(settings=settings),
         "take_screenshot": lambda: take_screenshot(settings=settings),
-        "open_website": lambda: open_website(target),
+        "open_website": lambda: open_website(target, settings=settings, logger=logger),
         "search_website": lambda: search_website(site, target),
         "search_google": lambda: search_google(target),
         "search_youtube": lambda: search_youtube(target),

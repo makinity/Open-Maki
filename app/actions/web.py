@@ -1,14 +1,20 @@
 """Web actions for opening websites and performing database-driven site searches."""
 
-from urllib.parse import quote_plus
+import json
+from urllib.parse import quote_plus, urlparse
 import webbrowser
 
 from app.models.website_aliases import DEFAULT_WEBSITE_ENTRIES, load_website_aliases
+from app.services.llm_service import request_text_response
 from app.utils.helpers import build_result
 
 
-def open_website(target: str) -> dict[str, object]:
-    """Open a supported website in the default browser."""
+def open_website(
+    target: str,
+    settings: dict[str, object] | None = None,
+    logger: object | None = None,
+) -> dict[str, object]:
+    """Open a supported website using aliases first, then a safe LLM inference fallback."""
     cleaned_target = target.strip().lower()
     if not cleaned_target:
         return build_result(False, "Please provide a website name.", None)
@@ -23,9 +29,16 @@ def open_website(target: str) -> dict[str, object]:
         return _open_in_browser(url, f"Opening {site_name}.")
 
     if "." not in cleaned_target and not cleaned_target.startswith(("http://", "https://", "www.")):
+        inferred_website = _infer_website(cleaned_target, settings=settings or {}, logger=logger)
+        if inferred_website is not None:
+            return _open_in_browser(
+                inferred_website["url"],
+                f"Opening {inferred_website['name']}.",
+            )
+
         return build_result(
             False,
-            f"I do not know that website yet: '{target}'. Add it to the website_aliases table in MySQL or use a direct URL.",
+            f"I could not identify the website '{target}'. Add it to the website_aliases table or use a direct URL.",
             None,
         )
 
@@ -109,6 +122,109 @@ def _load_supported_websites() -> dict[str, dict[str, str]]:
         }
         for entry in DEFAULT_WEBSITE_ENTRIES
     }
+
+
+def _infer_website(
+    target: str,
+    settings: dict[str, object],
+    logger: object | None = None,
+) -> dict[str, str] | None:
+    """Infer one official homepage URL for a plain-language website target."""
+    response_text = request_text_response(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You identify official website homepages for a desktop assistant. "
+                    "Return JSON only with keys 'name' and 'url'. "
+                    "Use the service or brand's main homepage, not a search page, article, profile, or app store page. "
+                    "If you are not confident, return {\"name\": \"\", \"url\": \"\"}."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Website target: {target}",
+            },
+        ],
+        settings=settings,
+        logger=logger,
+        temperature=0,
+    )
+    if not response_text:
+        return None
+
+    parsed_payload = _parse_inferred_website_response(response_text)
+    if parsed_payload is None:
+        if logger is not None and hasattr(logger, "debug"):
+            logger.debug("Website inference returned an unusable payload for '%s': %s", target, response_text)
+        return None
+
+    return parsed_payload
+
+
+def _parse_inferred_website_response(response_text: str) -> dict[str, str] | None:
+    """Return a normalized website payload from one LLM text response."""
+    normalized_text = response_text.strip()
+    if normalized_text.startswith("```"):
+        normalized_text = normalized_text.strip("`")
+        if normalized_text.lower().startswith("json"):
+            normalized_text = normalized_text[4:].strip()
+
+    parsed_json: dict[str, object] | None = None
+    try:
+        maybe_json = json.loads(normalized_text)
+        if isinstance(maybe_json, dict):
+            parsed_json = maybe_json
+    except json.JSONDecodeError:
+        parsed_json = None
+
+    if parsed_json is not None:
+        inferred_url = str(parsed_json.get("url", "")).strip()
+        inferred_name = str(parsed_json.get("name", "")).strip()
+        if not _is_valid_website_url(inferred_url):
+            return None
+        return {
+            "name": inferred_name or _display_name_from_url(inferred_url),
+            "url": inferred_url,
+        }
+
+    if _is_valid_website_url(normalized_text):
+        return {
+            "name": _display_name_from_url(normalized_text),
+            "url": normalized_text,
+        }
+
+    return None
+
+
+def _is_valid_website_url(url: str) -> bool:
+    """Return True when the inferred URL is a plausible HTTP(S) homepage."""
+    try:
+        parsed_url = urlparse(url)
+    except Exception:
+        return False
+
+    if parsed_url.scheme not in {"http", "https"}:
+        return False
+
+    if not parsed_url.netloc:
+        return False
+
+    return True
+
+
+def _display_name_from_url(url: str) -> str:
+    """Return a simple display label derived from a homepage URL."""
+    parsed_url = urlparse(url)
+    hostname = parsed_url.netloc.lower()
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+
+    primary_label = hostname.split(".", 1)[0].replace("-", " ").strip()
+    if not primary_label:
+        return "that website"
+
+    return primary_label.title()
 
 
 # TODO: Add admin helpers for creating website aliases directly from the assistant.

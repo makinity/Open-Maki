@@ -84,11 +84,20 @@ class _FakeAssistantController:
 class MakiUIApiTests(unittest.TestCase):
     """Verify the in-memory bridge payloads for the desktop scaffold."""
 
+    def _wait_until(self, predicate, timeout_seconds: float = 1.0) -> bool:
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return predicate()
+
     @patch("app.ui_api.build_startup_greeting", return_value=None)
     def test_get_bootstrap_data_returns_status_and_activity(self, mock_build_startup_greeting) -> None:
         """Bootstrap data should include the bot name, status, and session activity."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki Prime"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         payload = api.get_bootstrap_data()
 
@@ -96,6 +105,7 @@ class MakiUIApiTests(unittest.TestCase):
         self.assertEqual(payload["status"]["state"], "ready")
         self.assertFalse(payload["mic_active"])
         self.assertFalse(payload["auto_listen_enabled"])
+        self.assertTrue(payload["speaking_active"])
         self.assertEqual(payload["activity"][0]["type"], "system")
         mock_build_startup_greeting.assert_called_once()
 
@@ -104,9 +114,15 @@ class MakiUIApiTests(unittest.TestCase):
         """Bootstrap should speak the startup greeting once and keep it in activity."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         first_payload = api.get_bootstrap_data()
         second_payload = api.get_bootstrap_data()
+        self.assertTrue(
+            self._wait_until(
+                lambda: fake_controller.say_calls == ["Good evening, Sir. It is good to have you back."]
+            )
+        )
 
         self.assertEqual(
             fake_controller.say_calls,
@@ -125,10 +141,27 @@ class MakiUIApiTests(unittest.TestCase):
             logger=None,
         )
 
+    def test_send_command_exposes_speaking_flag_for_ui_animation(self) -> None:
+        """Command responses should briefly expose speaking activity for the orb animation."""
+        fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
+        api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
+
+        payload = api.send_command("open chrome")
+
+        self.assertTrue(payload["speaking_active"])
+        self.assertTrue(self._wait_until(lambda: fake_controller.say_calls == ["Opening chrome."]))
+        self.assertEqual(fake_controller.say_calls, ["Opening chrome."])
+
+        time.sleep(0.95)
+        latest_state = api.get_ui_state()
+        self.assertFalse(latest_state["speaking_active"])
+
     def test_send_command_rejects_empty_input(self) -> None:
         """Blank commands should return a friendly validation response."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         payload = api.send_command("   ")
 
@@ -143,8 +176,10 @@ class MakiUIApiTests(unittest.TestCase):
         """Typed UI commands should go through the real controller contract with source='ui'."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         payload = api.send_command("open chrome")
+        self.assertTrue(self._wait_until(lambda: fake_controller.say_calls == ["Opening chrome."]))
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["command"], "open chrome")
@@ -161,9 +196,11 @@ class MakiUIApiTests(unittest.TestCase):
         """One UI API instance should preserve the controller state across commands."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         first_payload = api.send_command("shutdown computer")
         second_payload = api.send_command("yes")
+        self.assertTrue(self._wait_until(lambda: len(fake_controller.say_calls) == 2))
 
         self.assertTrue(first_payload["ok"])
         self.assertTrue(first_payload["meta"]["requires_confirmation"])
@@ -186,8 +223,10 @@ class MakiUIApiTests(unittest.TestCase):
         """Exit-style commands should stay in the UI and return should_exit metadata."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         payload = api.send_command("exit")
+        self.assertTrue(self._wait_until(lambda: fake_controller.say_calls == ["Goodbye for now."]))
 
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["meta"]["should_exit"])
@@ -199,8 +238,12 @@ class MakiUIApiTests(unittest.TestCase):
         """Unknown-command backend replies should remain visible without an error status."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         payload = api.send_command("what is this")
+        self.assertTrue(
+            self._wait_until(lambda: fake_controller.say_calls == ["I did not understand that command."])
+        )
 
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["meta"]["result_status"], "unknown")
@@ -212,6 +255,7 @@ class MakiUIApiTests(unittest.TestCase):
         """Backend exceptions should return an error status and a system activity item."""
         fake_controller = _FakeAssistantController(settings={"bot_name": "Maki"})
         api = MakiUIApi(assistant_controller=fake_controller)
+        self.addCleanup(api.close)
 
         payload = api.send_command("raise error")
 

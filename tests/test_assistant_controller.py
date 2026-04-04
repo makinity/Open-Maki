@@ -77,6 +77,62 @@ class AssistantControllerUiTests(unittest.TestCase):
         mock_load_knowledge_text.assert_called_once()
         mock_load_knowledge_profile.assert_called_once()
 
+    @patch("app.controllers.assistant_controller.get_llm_api_key", return_value="groq-key")
+    @patch("app.controllers.assistant_controller.load_knowledge_profile", return_value={"preferred_title": "Sir"})
+    @patch("app.controllers.assistant_controller.load_knowledge_text", return_value="Creator Profile\nName: Mark Vencent L. Juntilla")
+    @patch("app.controllers.assistant_controller.load_app_registry", return_value={"apps": {}, "folders": {}})
+    @patch("app.controllers.assistant_controller.add_history_entry")
+    @patch(
+        "app.controllers.assistant_controller.build_chat_reply",
+        return_value="Your creator is Mark Vencent L. Juntilla from Davao Del Sur State College, Sir.",
+    )
+    @patch(
+        "app.controllers.assistant_controller.route_command",
+        return_value={
+            "success": False,
+            "message": "I did not understand that command.",
+            "data": {"status": "unknown"},
+        },
+    )
+    @patch(
+        "app.controllers.assistant_controller.parse_intent",
+        return_value={
+            "intent": "unknown",
+            "target": "who is your creator",
+            "raw_text": "who is your creator",
+        },
+    )
+    @patch("app.controllers.assistant_controller.parse_intent_with_llm", return_value=None)
+    def test_handle_text_uses_chat_fallback_for_unknown_questions_even_without_conversation_mode(
+        self,
+        mock_parse_intent_with_llm,
+        mock_parse_intent,
+        mock_route_command,
+        mock_build_chat_reply,
+        mock_add_history_entry,
+        mock_load_app_registry,
+        mock_load_knowledge_text,
+        mock_load_knowledge_profile,
+        mock_get_llm_api_key,
+    ) -> None:
+        """Unknown questions should use the LLM chat reply even when conversation mode is disabled."""
+        controller = AssistantController(settings=dict(_TEST_SETTINGS))
+
+        result = controller.handle_text("who is your creator", source="ui")
+
+        self.assertEqual(
+            result["message"],
+            "Your creator is Mark Vencent L. Juntilla from Davao Del Sur State College, Sir.",
+        )
+        mock_build_chat_reply.assert_called_once()
+        mock_parse_intent.assert_called_once_with("who is your creator")
+        mock_parse_intent_with_llm.assert_called_once()
+        mock_add_history_entry.assert_called_once()
+        mock_load_app_registry.assert_called_once()
+        mock_load_knowledge_text.assert_called_once()
+        mock_load_knowledge_profile.assert_called_once()
+        mock_get_llm_api_key.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()

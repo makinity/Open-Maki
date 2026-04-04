@@ -36,6 +36,36 @@ DEFAULT_WEBSITE_ENTRIES: list[dict[str, str]] = [
         "search_url_template": "https://github.com/search?q={query}",
     },
     {
+        "alias": "flutterflow",
+        "name": "FlutterFlow",
+        "url": "https://www.flutterflow.io",
+        "search_url_template": "",
+    },
+    {
+        "alias": "vercel",
+        "name": "Vercel",
+        "url": "https://vercel.com",
+        "search_url_template": "",
+    },
+    {
+        "alias": "netlify",
+        "name": "Netlify",
+        "url": "https://www.netlify.com",
+        "search_url_template": "",
+    },
+    {
+        "alias": "supabase",
+        "name": "Supabase",
+        "url": "https://supabase.com",
+        "search_url_template": "",
+    },
+    {
+        "alias": "firebase",
+        "name": "Firebase",
+        "url": "https://firebase.google.com",
+        "search_url_template": "",
+    },
+    {
         "alias": "wikipedia",
         "name": "Wikipedia",
         "url": "https://www.wikipedia.org",
@@ -110,3 +140,6 @@ def seed_default_website_aliases(connection: Any) -> None:
                 """,
                 (search_url_template, str(entry.get("alias", "")).lower()),
             )
+
+
+

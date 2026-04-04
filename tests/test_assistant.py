@@ -1,4 +1,4 @@
-﻿"""Tests for assistant speech integration and history source tracking."""
+"""Tests for assistant speech integration and history source tracking."""
 
 import unittest
 from unittest.mock import patch
@@ -593,3 +593,5 @@ class AssistantSpeechIntegrationTests(unittest.TestCase):
 # TODO: Add tests for auto-cancelled pending confirmations from new commands.
 if __name__ == "__main__":
     unittest.main()
+
+

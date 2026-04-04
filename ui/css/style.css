@@ -404,11 +404,26 @@ body::before {
     box-shadow: 0 0 16px rgba(255, 122, 157, 0.85);
 }
 
+.status-pill[data-speaking="true"] .status-dot {
+    animation: speaking-dot-pulse 360ms ease-in-out infinite alternate;
+}
+
 .status-dot {
     width: 0.72rem;
     height: 0.72rem;
     border-radius: 999px;
     flex: 0 0 auto;
+}
+
+@keyframes speaking-dot-pulse {
+    from {
+        transform: scale(1);
+        box-shadow: 0 0 16px rgba(118, 215, 255, 0.85);
+    }
+    to {
+        transform: scale(1.35);
+        box-shadow: 0 0 26px rgba(118, 255, 207, 0.92);
+    }
 }
 
 .status-card-grid {

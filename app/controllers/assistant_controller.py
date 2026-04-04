@@ -4,7 +4,7 @@ from typing import Any
 
 from app.brain.intent_parser import parse_intent
 from app.brain.llm_intent_parser import parse_intent_with_llm
-from app.config import BOT_NAME, DEFAULT_HISTORY_LIMIT
+from app.config import BOT_NAME, DEFAULT_HISTORY_LIMIT, get_llm_api_key
 from app.controllers.command_controller import route_command
 from app.controllers.history_controller import add_history_entry
 from app.controllers.knowledge_controller import load_knowledge_profile, load_knowledge_text
@@ -255,12 +255,13 @@ class AssistantController:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         """Return the result with an optional conversationally enhanced message."""
-        if not bool(self.settings.get("conversation_mode_enabled", False)):
-            return result
-
         intent_name = str(intent.get("intent", "unknown"))
-        llm_message: str | None
+        llm_message: str | None = None
+
         if intent_name == "unknown":
+            if not self._chat_fallback_enabled():
+                return result
+
             llm_message = build_chat_reply(
                 user_text=user_text,
                 settings=self.settings,
@@ -269,6 +270,9 @@ class AssistantController:
                 logger=self.logger,
             )
         else:
+            if not bool(self.settings.get("conversation_mode_enabled", False)):
+                return result
+
             llm_message = build_kind_command_reply(
                 user_text=user_text,
                 intent=intent,
@@ -285,6 +289,10 @@ class AssistantController:
         updated_result = dict(result)
         updated_result["message"] = llm_message
         return updated_result
+
+    def _chat_fallback_enabled(self) -> bool:
+        """Return True when unknown questions should use the LLM chat fallback."""
+        return bool(get_llm_api_key(str(self.settings.get("llm_provider", "auto"))))
 
     def _parse_intent_with_fallback(self, text: str) -> tuple[dict[str, str], str]:
         """Return the winning intent and which parser produced it."""
@@ -306,3 +314,4 @@ class AssistantController:
     def listen(self, settings: dict[str, Any]) -> dict[str, Any]:
         """Capture one input payload using the runtime-specific listen implementation."""
         raise NotImplementedError
+

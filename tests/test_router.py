@@ -1,7 +1,7 @@
 """Tests for the command router used by Maki."""
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.brain.command_router import route_command
 
@@ -99,6 +99,96 @@ class CommandRouterTests(unittest.TestCase):
         )
         mock_load_website_aliases.assert_called_once_with()
         mock_open_new_tab.assert_called_once_with("https://www.youtube.com")
+
+    @patch("app.actions.web.load_website_aliases", return_value={})
+    @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
+    def test_route_open_flutterflow_uses_built_in_alias(
+        self,
+        mock_open_new_tab,
+        mock_load_website_aliases,
+    ) -> None:
+        """Built-in FlutterFlow should open without LLM inference."""
+        result = route_command(
+            {"intent": "open_website", "target": "flutterflow", "raw_text": "open flutterflow"}
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "success": True,
+                "message": "Opening FlutterFlow.",
+                "data": None,
+            },
+        )
+        mock_load_website_aliases.assert_called_once_with()
+        mock_open_new_tab.assert_called_once_with("https://www.flutterflow.io")
+
+    @patch("app.actions.web.load_website_aliases", return_value={})
+    @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
+    def test_route_open_common_dev_sites_use_built_in_aliases(
+        self,
+        mock_open_new_tab,
+        mock_load_website_aliases,
+    ) -> None:
+        """Common developer sites should open directly from the built-in alias list."""
+        expected_sites = {
+            "vercel": ("Vercel", "https://vercel.com"),
+            "netlify": ("Netlify", "https://www.netlify.com"),
+            "supabase": ("Supabase", "https://supabase.com"),
+            "firebase": ("Firebase", "https://firebase.google.com"),
+        }
+
+        for alias, (display_name, url) in expected_sites.items():
+            with self.subTest(alias=alias):
+                result = route_command(
+                    {"intent": "open_website", "target": alias, "raw_text": f"open {alias}"}
+                )
+                self.assertEqual(
+                    result,
+                    {
+                        "success": True,
+                        "message": f"Opening {display_name}.",
+                        "data": None,
+                    },
+                )
+
+        self.assertEqual(mock_load_website_aliases.call_count, len(expected_sites))
+        self.assertEqual(
+            [call.args[0] for call in mock_open_new_tab.call_args_list],
+            [site[1] for site in expected_sites.values()],
+        )
+
+    @patch("app.actions.web.load_website_aliases", return_value={})
+    @patch("app.actions.web.request_text_response", return_value='{"name": "Reddit", "url": "https://www.reddit.com"}')
+    @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
+    def test_route_open_website_uses_llm_inference_for_unknown_sites(
+        self,
+        mock_open_new_tab,
+        mock_request_text_response,
+        mock_load_website_aliases,
+    ) -> None:
+        """Unknown site names should fall through to the clean LLM website inference path."""
+        logger = MagicMock()
+
+        result = route_command(
+            {"intent": "open_website", "target": "reddit", "raw_text": "open reddit"},
+            settings={"llm_provider": "auto"},
+            logger=logger,
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "success": True,
+                "message": "Opening Reddit.",
+                "data": None,
+            },
+        )
+        mock_load_website_aliases.assert_called_once_with()
+        mock_request_text_response.assert_called_once()
+        self.assertEqual(mock_request_text_response.call_args.kwargs["settings"], {"llm_provider": "auto"})
+        self.assertIs(mock_request_text_response.call_args.kwargs["logger"], logger)
+        mock_open_new_tab.assert_called_once_with("https://www.reddit.com")
 
     @patch("app.actions.web.load_website_aliases", return_value={})
     @patch("app.actions.web.webbrowser.open_new_tab", return_value=True)
@@ -240,3 +330,5 @@ class CommandRouterTests(unittest.TestCase):
 # TODO: Add router tests for browser failure cases and folder aliases.
 if __name__ == "__main__":
     unittest.main()
+
+

@@ -1,5 +1,5 @@
 (function () {
-    const UI_STATE_POLL_INTERVAL_MS = 450;
+    const UI_STATE_POLL_INTERVAL_MS = 180;
 
     const state = {
         botName: "Maki",
@@ -9,6 +9,7 @@
         },
         micActive: false,
         autoListenEnabled: false,
+        speakingActive: false,
         commandBusy: false,
         activity: [],
         bridge: null,
@@ -295,6 +296,8 @@
             return;
         }
 
+        const wasSpeaking = state.speakingActive;
+
         if (typeof payload.bot_name === "string" && payload.bot_name.trim()) {
             state.botName = payload.bot_name.trim();
         }
@@ -309,6 +312,13 @@
         }
         if (typeof payload.auto_listen_enabled !== "undefined") {
             state.autoListenEnabled = Boolean(payload.auto_listen_enabled);
+        }
+        if (typeof payload.speaking_active !== "undefined") {
+            state.speakingActive = Boolean(payload.speaking_active);
+        }
+
+        if (!wasSpeaking && state.speakingActive && state.orb && typeof state.orb.playSpeechPattern === "function") {
+            state.orb.playSpeechPattern(getLatestSpokenText());
         }
     }
 
@@ -375,11 +385,15 @@
 
     function renderStatus() {
         elements.statusPill.dataset.state = state.status.state;
+        elements.statusPill.dataset.speaking = String(state.speakingActive);
         elements.statusLabel.textContent = state.status.label;
-        elements.statusMode.textContent = titleCase(state.status.state);
-        elements.orbCaptionValue.textContent = titleCase(state.status.state);
+        elements.statusMode.textContent = state.speakingActive ? "Speaking" : titleCase(state.status.state);
+        elements.orbCaptionValue.textContent = state.speakingActive ? "Speaking" : titleCase(state.status.state);
         if (state.orb && typeof state.orb.setState === "function") {
             state.orb.setState(state.status.state);
+        }
+        if (state.orb && typeof state.orb.setSpeaking === "function") {
+            state.orb.setSpeaking(state.speakingActive);
         }
     }
 
@@ -440,6 +454,14 @@
         elements.sendButton.disabled = state.commandBusy;
         elements.commandInput.disabled = state.commandBusy;
         elements.micButton.disabled = false;
+    }
+
+    function getLatestSpokenText() {
+        const latestItem = [...state.activity].reverse().find((item) => {
+            const itemType = String(item.type || "").toLowerCase();
+            return itemType === "assistant" || itemType === "system";
+        });
+        return latestItem ? String(latestItem.text || "") : String(state.status.label || "");
     }
 
     function titleCase(value) {

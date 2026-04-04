@@ -18,12 +18,18 @@ class IntentParserTests(unittest.TestCase):
             "app.brain.intent_parser.load_website_aliases",
             return_value={},
         )
+        self.app_alias_entries_patcher = patch(
+            "app.brain.intent_parser.load_app_alias_entries",
+            return_value=[],
+        )
         self.command_patterns_patcher.start()
         self.website_aliases_patcher.start()
+        self.app_alias_entries_patcher.start()
 
     def tearDown(self) -> None:
         self.command_patterns_patcher.stop()
         self.website_aliases_patcher.stop()
+        self.app_alias_entries_patcher.stop()
 
     def test_parse_open_app_intent(self) -> None:
         """The parser should detect an application launch command."""
@@ -35,6 +41,19 @@ class IntentParserTests(unittest.TestCase):
                 "intent": "open_app",
                 "target": "chrome",
                 "raw_text": "open chrome",
+            },
+        )
+
+    def test_parse_open_unknown_target_returns_unknown_for_llm_fallback(self) -> None:
+        """Ambiguous open-target phrases should stay unresolved until LLM fallback decides."""
+        intent = parse_intent("open reddit")
+
+        self.assertEqual(
+            intent,
+            {
+                "intent": "unknown",
+                "target": "reddit",
+                "raw_text": "open reddit",
             },
         )
 
@@ -51,6 +70,21 @@ class IntentParserTests(unittest.TestCase):
 
         self.assertEqual(intent["intent"], "open_website")
         self.assertEqual(intent["target"], "gmail")
+
+    def test_parse_open_flutterflow_intent(self) -> None:
+        """The parser should detect FlutterFlow through the built-in website aliases."""
+        intent = parse_intent("open flutterflow")
+
+        self.assertEqual(intent["intent"], "open_website")
+        self.assertEqual(intent["target"], "flutterflow")
+
+    def test_parse_open_common_dev_site_intents(self) -> None:
+        """Common developer website aliases should resolve through the built-in website list."""
+        for alias in ("vercel", "netlify", "supabase", "firebase"):
+            with self.subTest(alias=alias):
+                intent = parse_intent(f"open {alias}")
+                self.assertEqual(intent["intent"], "open_website")
+                self.assertEqual(intent["target"], alias)
 
     def test_parse_search_google_phrase(self) -> None:
         """The parser should detect the longer Google search phrase."""
@@ -161,12 +195,14 @@ class IntentParserTests(unittest.TestCase):
         self.assertEqual(yes_intent["intent"], "confirm_yes")
         self.assertEqual(no_intent["intent"], "confirm_no")
 
+    @patch("app.brain.intent_parser.load_app_alias_entries")
     @patch("app.brain.intent_parser.load_website_aliases")
     @patch("app.brain.intent_parser.load_command_patterns")
     def test_parse_intent_uses_database_command_templates(
         self,
         mock_load_command_patterns,
         mock_load_website_aliases,
+        mock_load_app_alias_entries,
     ) -> None:
         """Database command templates should override the built-in phrase list."""
         mock_load_command_patterns.return_value = [
@@ -178,6 +214,7 @@ class IntentParserTests(unittest.TestCase):
             }
         ]
         mock_load_website_aliases.return_value = {}
+        mock_load_app_alias_entries.return_value = []
 
         intent = parse_intent("boot chrome")
 
@@ -188,3 +225,5 @@ class IntentParserTests(unittest.TestCase):
 # TODO: Add more coverage for quoted targets and direct URLs.
 if __name__ == "__main__":
     unittest.main()
+
+

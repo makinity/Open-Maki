@@ -201,6 +201,7 @@ class LlmIntentParserTests(unittest.TestCase):
         self.assertIn("chrome", combined_prompt)
         self.assertIn("downloads", combined_prompt)
         self.assertIn("youtube", combined_prompt)
+        self.assertIn("plain site or brand name", combined_prompt)
 
     def test_disabled_llm_parser_returns_none(self) -> None:
         """LLM parsing should not run when the setting is disabled."""

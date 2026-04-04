@@ -1,11 +1,11 @@
-﻿"""Assistant coordinator for input, parsing, routing, speaking, and history."""
+"""Assistant coordinator for input, parsing, routing, speaking, and history."""
 
 from typing import Any
 
 from app.brain.llm_intent_parser import parse_intent_with_llm
 from app.brain.command_router import route_command
 from app.brain.intent_parser import parse_intent
-from app.config import BOT_NAME, DEFAULT_HISTORY_LIMIT
+from app.config import BOT_NAME, DEFAULT_HISTORY_LIMIT, get_llm_api_key
 from app.services.app_registry import load_app_registry
 from app.services.chat_response_service import build_chat_reply, build_kind_command_reply
 from app.services.history_service import add_history_entry
@@ -350,16 +350,13 @@ class MakiAssistant:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         """Return the result with an optional conversationally enhanced message."""
-        if not bool(self.settings.get("conversation_mode_enabled", False)):
-            return result
-
-        result_data = result.get("data") or {}
-        if not isinstance(result_data, dict):
-            result_data = {}
-
         intent_name = str(intent.get("intent", "unknown"))
-        llm_message: str | None
+        llm_message: str | None = None
+
         if intent_name == "unknown":
+            if not self._chat_fallback_enabled():
+                return result
+
             llm_message = build_chat_reply(
                 user_text=user_text,
                 settings=self.settings,
@@ -368,6 +365,9 @@ class MakiAssistant:
                 logger=self.logger,
             )
         else:
+            if not bool(self.settings.get("conversation_mode_enabled", False)):
+                return result
+
             llm_message = build_kind_command_reply(
                 user_text=user_text,
                 intent=intent,
@@ -384,6 +384,10 @@ class MakiAssistant:
         updated_result = dict(result)
         updated_result["message"] = llm_message
         return updated_result
+
+    def _chat_fallback_enabled(self) -> bool:
+        """Return True when unknown questions should use the LLM chat fallback."""
+        return bool(get_llm_api_key(str(self.settings.get("llm_provider", "auto"))))
 
     def _parse_intent_with_fallback(self, text: str) -> tuple[dict[str, str], str]:
         """Return the winning intent and which parser produced it."""
@@ -407,3 +411,4 @@ class MakiAssistant:
 
 
 MakiBotAssistant = MakiAssistant
+
